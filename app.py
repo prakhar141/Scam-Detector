@@ -1,7 +1,6 @@
 """
-PhD-Level BharatScam Guard
-Advanced Multi-Modal Fraud Detection for Indian Digital Ecosystem
-Author: AI Research Lab (PhD-grade Implementation)
+PhD-Level BharatScam Guard – Fixed Edition
+KeyError resolved: dynamic weight construction + safe fallback
 """
 
 import streamlit as st
@@ -30,17 +29,17 @@ LOCAL_DIR.mkdir(exist_ok=True)
 
 LABELS = ["authority_name", "threat_type", "time_pressure", "payment_method", "language_mixing"]
 
-# PhD-level: Bayesian Priors for Indian Scam Ecosystem
+# Safe Bayesian priors (dict keyed exactly as LABELS)
 SCAM_PRIORS = {
-    "base_rate": 0.08,  # 8% baseline fraud rate in India (RBI 2023)
-    "authority_weight": 2.74,  # Empirical weight from Indian cybercrime data
-    "threat_weight": 3.12,
-    "urgency_weight": 2.89,
-    "payment_weight": 3.45,
-    "language_weight": 1.98
+    "base_rate": 0.08,
+    "authority_name": 2.74,
+    "threat_type": 3.12,
+    "time_pressure": 2.89,
+    "payment_method": 3.45,
+    "language_mixing": 1.98
 }
 
-# Advanced: Multi-lingual Pattern Repository (PhD Research Grade)
+# Multilingual patterns (same as before)
 MULTILINGUAL_SCAM_PATTERNS = {
     'en': {
         'digital_arrest': [r'digital arrest', r'cbi.*officer', r'narcotics.*bureau', r'fedex.*case'],
@@ -68,7 +67,6 @@ MULTILINGUAL_SCAM_PATTERNS = {
     }
 }
 
-# Entity Detection Patterns (PhD-level Regex Engineering)
 ENTITY_PATTERNS = {
     'indian_phone': r'(?:\+91|0|९१)?[६-९]\d{9}|(?:\+91|0)[6-9]\d{9}',
     'upi_vpa': r'[\w.-]+@(?:paytm|ybl|upi|sbi|axis|hdfc|icici|pnb|bob)',
@@ -82,9 +80,6 @@ ENTITY_PATTERNS = {
     'authority_words': r'(?:rbi|reserve.*bank|sbi|hdfc|icici|axis|cbi|narcotics|fedex|govt|government|pm.*modi)'
 }
 
-# --------------------------------------------------
-# PhD-Level Data Structures
-# --------------------------------------------------
 @dataclass
 class ScamSignal:
     label: str
@@ -106,112 +101,77 @@ class RiskProfile:
     temporal_features: Dict
     recommendations: List[str]
 
-# --------------------------------------------------
-# PhD-Level Feature Engineering
-# --------------------------------------------------
 class PhDFeatureEngineer:
-    """Advanced feature extraction for scam detection"""
-    
     def __init__(self):
         self.linguistic_features = {}
         self.pattern_cache = {}
-        
+
     def extract_linguistic_features(self, text: str) -> Dict:
-        """PhD-level linguistic analysis"""
         features = {}
-        
-        # 1. Character-level features
         features['char_count'] = len(text)
         features['digit_ratio'] = sum(c.isdigit() for c in text) / len(text) if text else 0
         features['upper_ratio'] = sum(c.isupper() for c in text) / len(text) if text else 0
         features['special_char_ratio'] = sum(not c.isalnum() for c in text) / len(text) if text else 0
-        
-        # 2. Word-level features
         words = text.split()
         features['word_count'] = len(words)
         features['avg_word_length'] = np.mean([len(w) for w in words]) if words else 0
         features['unique_word_ratio'] = len(set(words)) / len(words) if words else 0
-        
-        # 3. Sentence-level features
         sentences = re.split(r'[.!?।]', text)
         features['sentence_count'] = len([s for s in sentences if s.strip()])
         features['avg_sentence_length'] = np.mean([len(s.split()) for s in sentences if s.strip()]) if sentences else 0
-        
-        # 4. Advanced: N-gram analysis for scam patterns
         for n in [2, 3, 4]:
             ngrams = self._extract_ngrams(text.lower(), n)
             scam_ngrams = self._get_scam_ngrams(n)
             features[f'scam_ngram_{n}_ratio'] = len([ng for ng in ngrams if ng in scam_ngrams]) / len(ngrams) if ngrams else 0
-        
-        # 5. Readability scores (simplified for Indian languages)
         features['readability_score'] = self._calculate_readability(text)
-        
-        # 6. Emotional valence (scam-specific)
         features['threat_density'] = self._calculate_threat_density(text)
         features['urgency_density'] = self._calculate_urgency_density(text)
-        
         return features
-    
+
     def _extract_ngrams(self, text: str, n: int) -> List[str]:
-        """Extract character n-grams"""
         return [text[i:i+n] for i in range(len(text)-n+1)]
-    
+
     def _get_scam_ngrams(self, n: int) -> set:
-        """Scam-specific n-grams from research"""
         scam_ngrams = {
             2: {'kt', 'yc', 'xp', 'qr', 'up', 'pi', 'ot', 'p.', 'c.', 'b.'},
             3: {'kyc', 'otp', 'upi', 'atm', 'pan', 'rbi', 'sbi', 'cbi', 'pin', 'cvv'},
             4: {'paytm', 'phone', 'google', 'link', 'click', 'block', 'dear', 'customer'}
         }
         return scam_ngrams.get(n, set())
-    
+
     def _calculate_readability(self, text: str) -> float:
-        """Simplified readability for multilingual text"""
         words = text.split()
         if not words:
             return 0
-        
-        # Count complex words (>6 characters)
         complex_words = [w for w in words if len(w) > 6]
         return len(complex_words) / len(words)
-    
+
     def _calculate_threat_density(self, text: str) -> float:
-        """Density of threatening words"""
         threat_words = ['arrest', 'girlfriend', 'legal', 'court', 'warrant', 'police', 'cbi', 'narcotics', 'block', 'suspend']
         words = text.lower().split()
         return sum(1 for w in words if any(threat in w for threat in threat_words)) / len(words) if words else 0
-    
+
     def _calculate_urgency_density(self, text: str) -> float:
-        """Density of urgent words"""
         urgent_words = ['immediately', 'urgent', 'now', 'hurry', 'quick', 'fast', 'within', '24 hours', 'today', 'soon']
         words = text.lower().split()
         return sum(1 for w in words if any(urgent in w for urgent in urgent_words)) / len(words) if words else 0
 
-# --------------------------------------------------
-# PhD-Level Pattern Recognition Engine
-# --------------------------------------------------
 class PhDPatternEngine:
-    """Advanced pattern matching with multilingual support"""
-    
     def __init__(self):
         self.pattern_weights = {
-            'digital_arrest': 4.2,  # Highest weight - most dangerous
+            'digital_arrest': 4.2,
             'kyc': 3.8,
             'lottery': 3.1,
             'otp': 3.9,
             'job': 2.9,
             'government': 3.5
         }
-        
+
     def detect_patterns(self, text: str) -> Tuple[float, List[Dict]]:
-        """PhD-level pattern detection across languages"""
         total_score = 0
         matches = []
         text_lower = text.lower()
-        
-        # Detect language
         detected_langs = self._detect_languages(text)
-        
         for lang in detected_langs:
             if lang in MULTILINGUAL_SCAM_PATTERNS:
                 for pattern_type, patterns in MULTILINGUAL_SCAM_PATTERNS[lang].items():
@@ -226,24 +186,17 @@ class PhDPatternEngine:
                                 'weight': weight,
                                 'description': self._get_pattern_description(pattern_type)
                             })
-                            break  # One match per pattern type
-        
+                            break
         return total_score, matches
-    
+
     def _detect_languages(self, text: str) -> List[str]:
-        """Simple language detection for Indian languages"""
-        langs = ['en']  # Default
-        
-        # Hindi detection
+        langs = ['en']
         if re.search(r'[\u0900-\u097F]', text):
             langs.append('hi')
-        
-        # Marathi detection  
         if re.search(r'[\u0900-\u097F]', text) and any(word in text.lower() for word in ['असे', 'आहे', 'नाही']):
             langs.append('mr')
-        
         return langs
-    
+
     def _get_pattern_description(self, pattern_type: str) -> str:
         descriptions = {
             'digital_arrest': 'Digital arrest impersonation scam',
@@ -255,12 +208,7 @@ class PhDPatternEngine:
         }
         return descriptions.get(pattern_type, 'Unknown pattern')
 
-# --------------------------------------------------
-# PhD-Level Entity Recognition
-# --------------------------------------------------
 class PhDEntityRecognizer:
-    """Advanced entity recognition for financial fraud detection"""
-    
     def __init__(self):
         self.entity_risk_scores = {
             'indian_phone': 0.3,
@@ -270,86 +218,49 @@ class PhDEntityRecognizer:
             'bank_account': 1.5,
             'ifsc': 0.9
         }
-    
+
     def extract_entities(self, text: str) -> Tuple[Dict, float]:
-        """Extract and score entities"""
         entities = {}
         entity_score = 0
-        
         for entity_type, pattern in ENTITY_PATTERNS.items():
             if entity_type in ['urgency_words', 'threat_words', 'payment_words', 'authority_words']:
-                continue  # These are handled separately
-                
+                continue
             matches = re.findall(pattern, text, re.IGNORECASE)
             if matches:
-                entities[entity_type] = list(set(matches))  # Unique matches
+                entities[entity_type] = list(set(matches))
                 entity_score += self.entity_risk_scores.get(entity_type, 0.5)
-        
         return entities, entity_score
-    
+
     def extract_suspicious_phrases(self, text: str) -> List[str]:
-        """Extract suspicious phrase combinations"""
         suspicious = []
-        
-        # Check for authority + urgency
-        if re.search(ENTITY_PATTERNS['authority_words'], text, re.IGNORECASE) and \
-           re.search(ENTITY_PATTERNS['urgency_words'], text, re.IGNORECASE):
+        if re.search(ENTITY_PATTERNS['authority_words'], text, re.IGNORECASE) and re.search(ENTITY_PATTERNS['urgency_words'], text, re.IGNORECASE):
             suspicious.append("Authority + Urgency combination")
-        
-        # Check for threat + payment
-        if re.search(ENTITY_PATTERNS['threat_words'], text, re.IGNORECASE) and \
-           re.search(ENTITY_PATTERNS['payment_words'], text, re.IGNORECASE):
+        if re.search(ENTITY_PATTERNS['threat_words'], text, re.IGNORECASE) and re.search(ENTITY_PATTERNS['payment_words'], text, re.IGNORECASE):
             suspicious.append("Threat + Payment combination")
-        
-        # Check for phone + payment
-        if re.search(ENTITY_PATTERNS['indian_phone'], text, re.IGNORECASE) and \
-           re.search(ENTITY_PATTERNS['payment_words'], text, re.IGNORECASE):
+        if re.search(ENTITY_PATTERNS['indian_phone'], text, re.IGNORECASE) and re.search(ENTITY_PATTERNS['payment_words'], text, re.IGNORECASE):
             suspicious.append("Phone + Payment request")
-        
         return suspicious
 
-# --------------------------------------------------
-# PhD-Level Bayesian Risk Calculator
-# --------------------------------------------------
 class PhDRiskCalculator:
-    """PhD-level risk calculation using Bayesian inference and ensemble methods"""
-    
     def __init__(self):
         self.feature_engineer = PhDFeatureEngineer()
         self.pattern_engine = PhDPatternEngine()
         self.entity_recognizer = PhDEntityRecognizer()
-        
-        # Bayesian priors
         self.priors = SCAM_PRIORS
-        
-        # Ensemble weights (PhD-level model stacking)
-        self.model_weight = 0.45      # Deep learning model
-        self.pattern_weight = 0.30    # Pattern matching
-        self.entity_weight = 0.15     # Entity recognition
-        self.linguistic_weight = 0.10 # Linguistic features
-        
+        self.model_weight = 0.45
+        self.pattern_weight = 0.30
+        self.entity_weight = 0.15
+        self.linguistic_weight = 0.10
+
     def calculate_risk(self, text: str, model_probs: np.ndarray, thresholds: np.ndarray) -> RiskProfile:
-        """PhD-level ensemble risk calculation"""
-        
-        # 1. Model component
         model_score = self._calculate_model_score(model_probs, thresholds)
-        
-        # 2. Pattern component
         pattern_score, pattern_matches = self.pattern_engine.detect_patterns(text)
-        pattern_score = min(pattern_score / 10, 1.0)  # Normalize
-        
-        # 3. Entity component
+        pattern_score = min(pattern_score / 10, 1.0)
         entities, entity_score = self.entity_recognizer.extract_entities(text)
-        entity_score = min(entity_score / 5, 1.0)  # Normalize
-        
-        # 4. Linguistic component
+        entity_score = min(entity_score / 5, 1.0)
         linguistic_features = self.feature_engineer.extract_linguistic_features(text)
         linguistic_score = self._calculate_linguistic_score(linguistic_features)
-        
-        # 5. Combination bonus (PhD-level interaction effects)
         combination_bonus = self._calculate_combination_bonus(model_probs, pattern_matches, entities)
-        
-        # 6. Ensemble score (Weighted average with Bayesian smoothing)
         ensemble_score = (
             self.model_weight * model_score +
             self.pattern_weight * pattern_score +
@@ -357,22 +268,11 @@ class PhDRiskCalculator:
             self.linguistic_weight * linguistic_score +
             combination_bonus
         )
-        
-        # 7. Apply Bayesian prior adjustment
         final_score = self._apply_bayesian_adjustment(ensemble_score, text)
-        
-        # 8. Convert to risk level
         risk_level = self._score_to_risk_level(final_score)
-        
-        # 9. Calculate confidence
         confidence = self._calculate_confidence(model_probs, pattern_matches, linguistic_features)
-        
-        # 10. Generate recommendations
         recommendations = self._generate_recommendations(risk_level, pattern_matches, entities)
-        
-        # 11. Build signals
         signals = self._build_signals(model_probs, thresholds, linguistic_features, pattern_matches)
-        
         return RiskProfile(
             score=round(final_score * 100, 2),
             level=risk_level,
@@ -384,81 +284,52 @@ class PhDRiskCalculator:
             temporal_features=linguistic_features,
             recommendations=recommendations
         )
-    
+
     def _calculate_model_score(self, probs: np.ndarray, thresholds: np.ndarray) -> float:
-        """Convert model probabilities to score"""
         detected = probs > thresholds
         if not detected.any():
-            return probs.max() * 0.3  # Small penalty for weak signals
-        
-        # Weighted average of detected signals
+            return probs.max() * 0.3
         detected_probs = probs[detected]
-        weights = np.array([self.priors[f"{label}_weight"] for label, d in zip(LABELS, detected) if d])
+        weights = np.array([self.priors.get(label, 1.0) for label, d in zip(LABELS, detected) if d])
         return np.average(detected_probs, weights=weights)
-    
+
     def _calculate_linguistic_score(self, features: Dict) -> float:
-        """Calculate linguistic risk score"""
-        # High threat/urgency density = higher score
         threat_score = features.get('threat_density', 0)
         urgency_score = features.get('urgency_density', 0)
-        
-        # Suspicious n-grams
         ngram_score = max(features.get('scam_ngram_2_ratio', 0),
                          features.get('scam_ngram_3_ratio', 0),
                          features.get('scam_ngram_4_ratio', 0))
-        
-        # Combine with weights
         return (threat_score * 0.4 + urgency_score * 0.4 + ngram_score * 0.2)
-    
+
     def _calculate_combination_bonus(self, probs: np.ndarray, patterns: List[Dict], entities: Dict) -> float:
-        """PhD-level: Bonus for dangerous combinations"""
         bonus = 0
-        
-        # Model combination bonus
         detected = probs > 0.5
-        if detected.sum() >= 3:  # 3+ signals detected
+        if detected.sum() >= 3:
             bonus += 0.15
-        
-        # Authority + Threat + Payment (deadly combo)
         pattern_types = [p['type'] for p in patterns]
         if all(pt in pattern_types for pt in ['authority_name', 'threat_type', 'payment_method']):
             bonus += 0.25
-        
-        # Entity combination bonus
         if 'upi_vpa' in entities and 'indian_phone' in entities:
             bonus += 0.1
-        
-        # Multiple languages (sophisticated scam)
         langs = set([p['language'] for p in patterns])
         if len(langs) >= 2:
             bonus += 0.08
-        
-        return min(bonus, 0.3)  # Cap at 30%
-    
+        return min(bonus, 0.3)
+
     def _apply_bayesian_adjustment(self, score: float, text: str) -> float:
-        """Apply Bayesian prior based on message characteristics"""
-        # Length prior (very short messages are often scams)
         if len(text) < 50:
             score += 0.1
-        
-        # URL prior (presence of URLs increases risk)
         if re.search(r'http[s]?://', text):
             score += 0.05
-        
-        # Multiple phone numbers
         phones = re.findall(ENTITY_PATTERNS['indian_phone'], text)
         if len(phones) >= 2:
             score += 0.08
-        
-        # Upper case ratio (scammers often use ALL CAPS)
         upper_ratio = sum(1 for c in text if c.isupper()) / len(text) if text else 0
         if upper_ratio > 0.3:
             score += 0.06
-        
         return min(score, 1.0)
-    
+
     def _score_to_risk_level(self, score: float) -> str:
-        """Convert score to risk level with PhD-level thresholds"""
         if score < 0.25:
             return "SAFE"
         elif score < 0.45:
@@ -467,37 +338,25 @@ class PhDRiskCalculator:
             return "SUSPICIOUS"
         else:
             return "SCAM"
-    
+
     def _calculate_confidence(self, probs: np.ndarray, patterns: List[Dict], features: Dict) -> float:
-        """Calculate confidence using entropy and signal strength"""
-        # Model confidence (inverse entropy)
         entropy = -np.sum(probs * np.log(probs + 1e-10))
         max_entropy = np.log(len(probs))
         model_conf = 1 - (entropy / max_entropy)
-        
-        # Pattern confidence
         pattern_conf = min(len(patterns) * 0.2, 0.8)
-        
-        # Feature confidence
         feature_conf = min(features.get('threat_density', 0) + features.get('urgency_density', 0), 0.8)
-        
-        # Combined confidence
         return (model_conf * 0.6 + pattern_conf * 0.3 + feature_conf * 0.1)
-    
+
     def _generate_recommendations(self, risk_level: str, patterns: List[Dict], entities: Dict) -> List[str]:
-        """Generate PhD-level recommendations"""
         recommendations = []
-        
         if risk_level == "SAFE":
             recommendations.append("✅ Message appears safe. No action needed.")
-        
         elif risk_level == "CAUTION":
             recommendations.extend([
                 "⚠️ Verify sender identity through official channels",
                 "🔗 Do not click on any links in the message",
                 "📞 If from bank, call official customer service"
             ])
-        
         elif risk_level == "SUSPICIOUS":
             recommendations.extend([
                 "🚨 DO NOT respond to this message",
@@ -505,8 +364,7 @@ class PhDRiskCalculator:
                 "🔒 Never share OTP, passwords, or personal details",
                 "🏦 Verify through official bank branch/website"
             ])
-        
-        else:  # SCAM
+        else:
             recommendations.extend([
                 "🆘 THIS IS A CONFIRMED SCAM - DELETE IMMEDIATELY",
                 "📞 Report to Cyber Crime: 1930",
@@ -514,8 +372,6 @@ class PhDRiskCalculator:
                 "📢 Warn family and friends about this scam pattern",
                 "🏦 If you shared details, contact bank immediately"
             ])
-        
-        # Add specific recommendations based on patterns
         pattern_types = [p['type'] for p in patterns]
         if 'digital_arrest' in pattern_types:
             recommendations.insert(0, "👮 Digital arrest is ALWAYS fake - real police never do this")
@@ -523,13 +379,10 @@ class PhDRiskCalculator:
             recommendations.append("🏦 Banks never ask for KYC update via SMS/WhatsApp")
         if 'lottery' in pattern_types:
             recommendations.append("🎰 You cannot win a lottery you never entered")
-        
         return recommendations
-    
+
     def _build_signals(self, probs: np.ndarray, thresholds: np.ndarray, features: Dict, patterns: List[Dict]) -> List[ScamSignal]:
-        """Build detailed signals for explainability"""
         signals = []
-        
         for i, (label, prob) in enumerate(zip(LABELS, probs)):
             if prob > thresholds[i]:
                 signal = ScamSignal(
@@ -541,23 +394,15 @@ class PhDRiskCalculator:
                     pattern_matches=[p['type'] for p in patterns]
                 )
                 signals.append(signal)
-        
         return signals
 
-# --------------------------------------------------
-# PhD-Level Model Loader
-# --------------------------------------------------
-@st.cache_resource(show_spinner="🧠 Initializing PhD-Level BharatScam Guard...")
+@st.cache_resource(show_spinner="🧠 Initializing High-Level BharatScam Guard...")
 def load_phD_detector():
-    """Load and initialize all PhD-level components"""
-    
-    # Download model files
     REQUIRED_FILES = [
-        "config.json", "model.safetensors", "tokenizer.json", 
-        "tokenizer_config.json", "special_tokens_map.json", 
+        "config.json", "model.safetensors", "tokenizer.json",
+        "tokenizer_config.json", "special_tokens_map.json",
         "vocab.json", "merges.txt", "scam_v1.json"
     ]
-    
     for file in REQUIRED_FILES:
         hf_hub_download(
             repo_id=REPO_ID,
@@ -566,23 +411,15 @@ def load_phD_detector():
             local_dir=LOCAL_DIR,
             local_dir_use_symlinks=False
         )
-    
-    # Load tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(LOCAL_DIR)
     model = AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR)
     model.to(DEVICE)
     model.eval()
-    
-    # Load calibration
     with open(LOCAL_DIR / "scam_v1.json", "r") as f:
         cal = json.load(f)
-    
     temperature = float(cal.get("temperature", 1.0))
     thresholds = np.array(cal.get("thresholds", [0.5] * len(LABELS)))
-    
-    # Initialize PhD-level components
     risk_calculator = PhDRiskCalculator()
-    
     return {
         'model': model,
         'tokenizer': tokenizer,
@@ -591,176 +428,67 @@ def load_phD_detector():
         'risk_calculator': risk_calculator
     }
 
-# --------------------------------------------------
-# PhD-Level Visualization Engine
-# --------------------------------------------------
 class PhDVisualizationEngine:
-    """Advanced visualizations for risk analysis"""
-    
     @staticmethod
     def plot_risk_gauge(score: float, level: str):
-        """Create risk gauge visualization"""
-        colors = {
-            'SAFE': '#28a745',
-            'CAUTION': '#ffc107', 
-            'SUSPICIOUS': '#fd7e14',
-            'SCAM': '#dc3545'
-        }
-        
+        colors = {'SAFE': '#28a745', 'CAUTION': '#ffc107', 'SUSPICIOUS': '#fd7e14', 'SCAM': '#dc3545'}
         fig = go.Figure(go.Indicator(
-            mode = "gauge+number+delta",
-            value = score,
-            domain = {'x': [0, 1], 'y': [0, 1]},
-            title = {'text': "Risk Score", 'font': {'size': 24}},
-            delta = {'reference': 50, 'increasing': {'color': "#dc3545"}},
-            gauge = {
-                'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
-                'bar': {'color': colors[level]},
-                'bgcolor': "white",
-                'borderwidth': 2,
-                'bordercolor': "gray",
-                'steps': [
-                    {'range': [0, 25], 'color': "#d4edda"},
-                    {'range': [25, 45], 'color': "#fff3cd"},
-                    {'range': [45, 65], 'color': "#ffeaa7"},
-                    {'range': [65, 100], 'color': "#f8d7da"}
-                ],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': score
-                }
-            }
+            mode="gauge+number+delta", value=score,
+            domain={'x': [0, 1], 'y': [0, 1]},
+            title={'text': "Risk Score", 'font': {'size': 24}},
+            delta={'reference': 50, 'increasing': {'color': "#dc3545"}},
+            gauge={'axis': {'range': [None, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                   'bar': {'color': colors[level]}, 'bgcolor': "white", 'borderwidth': 2, 'bordercolor': "gray",
+                   'steps': [{'range': [0, 25], 'color': "#d4edda"}, {'range': [25, 45], 'color': "#fff3cd"},
+                             {'range': [45, 65], 'color': "#ffeaa7"}, {'range': [65, 100], 'color': "#f8d7da"}],
+                   'threshold': {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': score}}
         ))
-        
-        fig.update_layout(
-            paper_bgcolor="white",
-            font={'color': "darkblue", 'family': "Arial"}
-        )
-        
-        return fig
-    
-    @staticmethod
-    def plot_signal_strength(signals: List[ScamSignal]):
-        """Plot signal strength radar chart"""
-        if not signals:
-            return None
-            
-        labels = [s.label.replace('_', ' ').title() for s in signals]
-        values = [s.probability for s in signals]
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=values,
-            theta=labels,
-            fill='toself',
-            name='Signal Strength',
-            line_color='rgb(255, 0, 0)',
-            fillcolor='rgba(255, 0, 0, 0.3)'
-        ))
-        
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 1]
-                )),
-            showlegend=False,
-            title="Detected Signal Strengths"
-        )
-        
-        return fig
-    
-    @staticmethod
-    def plot_confidence_distribution(confidence: float):
-        """Plot confidence as a progress bar"""
-        fig = go.Figure(go.Bar(
-            x=[confidence, 100-confidence],
-            y=['Confidence'],
-            orientation='h',
-            marker_color=['#28a745', '#e9ecef'],
-            text=[f'{confidence}%', ''],
-            textposition='inside',
-            insidetextanchor='middle'
-        ))
-        
-        fig.update_layout(
-            title="Analysis Confidence",
-            showlegend=False,
-            xaxis=dict(range=[0, 100], showticklabels=False),
-            yaxis=dict(showticklabels=False),
-            height=100
-        )
-        
+        fig.update_layout(paper_bgcolor="white", font={'color': "darkblue", 'family': "Arial"})
         return fig
 
-# --------------------------------------------------
-# PhD-Level Streamlit UI
-# --------------------------------------------------
+    @staticmethod
+    def plot_signal_strength(signals: List[ScamSignal]):
+        if not signals:
+            return None
+        labels = [s.label.replace('_', ' ').title() for s in signals]
+        values = [s.probability for s in signals]
+        fig = go.Figure()
+        fig.add_trace(go.Scatterpolar(r=values, theta=labels, fill='toself', name='Signal Strength',
+                                      line_color='rgb(255, 0, 0)', fillcolor='rgba(255, 0, 0, 0.3)'))
+        fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])), showlegend=False,
+                          title="Detected Signal Strengths")
+        return fig
+
+    @staticmethod
+    def plot_confidence_distribution(confidence: float):
+        fig = go.Figure(go.Bar(x=[confidence, 100 - confidence], y=['Confidence'], orientation='h',
+                               marker_color=['#28a745', '#e9ecef'], text=[f'{confidence}%', ''],
+                               textposition='inside', insidetextanchor='middle'))
+        fig.update_layout(title="Analysis Confidence", showlegend=False, xaxis=dict(range=[0, 100], showticklabels=False),
+                          yaxis=dict(showticklabels=False), height=100)
+        return fig
+
 def main():
-    """PhD-level Streamlit application"""
-    
-    # Page configuration
-    st.set_page_config(
-        page_title="🧠 PhD BharatScam Guard",
-        page_icon="🧠",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
-    # Custom CSS
+    st.set_page_config(page_title="🧠  BharatScam Guard", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
     st.markdown("""
     <style>
-    .phd-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 2rem;
-        border-radius: 1rem;
-        margin-bottom: 2rem;
-        text-align: center;
-    }
-    .risk-card {
-        padding: 1.5rem;
-        border-radius: 1rem;
-        margin: 1rem 0;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    .signal-badge {
-        display: inline-block;
-        padding: 0.5rem 1rem;
-        border-radius: 2rem;
-        margin: 0.25rem;
-        font-size: 0.9rem;
-        font-weight: 500;
-    }
-    .recommendation-box {
-        background: #f8f9fa;
-        border-left: 4px solid #007bff;
-        padding: 1rem;
-        margin: 0.5rem 0;
-        border-radius: 0.5rem;
-    }
+    .phd-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; border-radius: 1rem; margin-bottom: 2rem; text-align: center; }
+    .risk-card { padding: 1.5rem; border-radius: 1rem; margin: 1rem 0; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+    .recommendation-box { background: #f8f9fa; border-left: 4px solid #007bff; padding: 1rem; margin: 0.5rem 0; border-radius: 0.5rem; }
     </style>
-    """, unsafe_allow_html=True)
-    
-    # Header
-    st.markdown("""
     <div class="phd-header">
-        <h1>🧠 PhD BharatScam Guard</h1>
+        <h1>🧠  BharatScam Guard</h1>
         <p>Advanced Multi-Modal Fraud Detection System for Indian Digital Ecosystem</p>
         <p><em>Powered by PhD-level Research in Computational Linguistics & Bayesian Risk Analysis</em></p>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Sidebar
+
     with st.sidebar:
-        st.markdown("### 🧪 PhD Research Features")
-        
+        st.markdown("### 🧪  Research Features")
         with st.expander("🔬 Advanced Settings", expanded=False):
             pattern_weight = st.slider("Pattern Matching Weight", 0.1, 0.5, 0.3, 0.05)
             entity_weight = st.slider("Entity Recognition Weight", 0.05, 0.3, 0.15, 0.05)
             linguistic_weight = st.slider("Linguistic Features Weight", 0.05, 0.2, 0.1, 0.05)
-        
         st.markdown("### 📚 Research Citations")
         st.info("""
         **Detection Methods:**
@@ -768,27 +496,17 @@ def main():
         - Multilingual Pattern Mining  
         - Adversarial Feature Engineering
         - Temporal Signal Analysis
-        
         **Data Sources:**
         - RBI Fraud Reports 2023
         - Indian Cybercrime Database
         - Multilingual Scam Corpus
         """)
-        
         st.markdown("### 🚨 Emergency")
-        st.error("""
-        **Cyber Crime Helpline: 1930**
-        
-        **Online:** cybercrime.gov.in
-        """)
-    
-    # Main content
+        st.error("**Cyber Crime Helpline: 1930**\n\n**Online:** cybercrime.gov.in")
+
     col1, col2 = st.columns([2, 1])
-    
     with col1:
         st.markdown("### 🔍 Message Analysis")
-        
-        # Example selector
         examples = {
             "Digital Arrest Scam": "I am Inspector Rajesh Kumar from CBI Digital Crime Unit. Your Aadhar linked to drug trafficking case. You must pay ₹50,000 fine within 2 hours or face digital arrest. Call 9876543210 immediately.",
             "KYC Scam": "Dear SBI Customer, Your KYC has expired. Click here to update: bit.ly/sbi-kyc-update or your account will be blocked within 24 hours. Never share OTP with anyone.",
@@ -796,63 +514,33 @@ def main():
             "Safe Message": "Hi, are we still meeting for lunch today? Let me know if you're running late. See you at 1 PM!",
             "Lottery Scam": "🎉 CONGRATULATIONS! You won ₹1 Crore in KBC WhatsApp Lottery! To claim, send ₹25,000 processing fee to this Paytm number: 9876543210"
         }
-        
         selected_example = st.selectbox("📋 Load Example Message", ["Custom"] + list(examples.keys()))
         example_text = examples.get(selected_example, "")
-        
-        user_text = st.text_area(
-            "✏️ Enter SMS, WhatsApp, or Email message:",
-            value=example_text,
-            height=150,
-            placeholder="Paste your message here for PhD-level analysis...",
-            key="message_input"
-        )
-        
+        user_text = st.text_area("✏️ Enter SMS, WhatsApp, or Email message:", value=example_text, height=150,
+                                 placeholder="Paste your message here for PhD-level analysis...", key="message_input")
         analyze_col, clear_col = st.columns([1, 4])
         with analyze_col:
             analyze_clicked = st.button("🧠 Analyze", type="primary", use_container_width=True)
-    
-    # Analysis section
+
     if analyze_clicked and user_text.strip():
         if len(user_text) < 10:
             st.warning("⚠️ Message too short for meaningful analysis. Please enter at least 10 characters.")
             return
-        
-        # Load detector
         with st.spinner("🧠 Running PhD-level analysis pipeline..."):
             detector = load_phD_detector()
-            
-            # Tokenize and predict
-            inputs = detector['tokenizer'](
-                user_text,
-                truncation=True,
-                padding=True,
-                max_length=128,
-                return_tensors="pt"
-            ).to(DEVICE)
-            
+            inputs = detector['tokenizer'](user_text, truncation=True, padding=True, max_length=128, return_tensors="pt").to(DEVICE)
             with torch.no_grad():
                 outputs = detector['model'](**inputs)
                 logits = outputs.logits / detector['temperature']
                 probs = torch.sigmoid(logits).cpu().numpy()[0]
-            
-            # Adaptive thresholding
-            thresholds = detector['thresholds']  # Could be made adaptive here
-            
-            # PhD-level risk calculation
+            thresholds = detector['thresholds']
             risk_profile = detector['risk_calculator'].calculate_risk(user_text, probs, thresholds)
-        
-        # Display results
         viz_engine = PhDVisualizationEngine()
-        
-        # Risk score and gauge
         st.markdown("---")
         col_viz1, col_viz2 = st.columns([2, 1])
-        
         with col_viz1:
             fig_gauge = viz_engine.plot_risk_gauge(risk_profile.score, risk_profile.level)
             st.plotly_chart(fig_gauge, use_container_width=True)
-        
         with col_viz2:
             st.markdown(f"""
             <div class="risk-card" style="background: {'#d4edda' if risk_profile.level == 'SAFE' else '#fff3cd' if risk_profile.level == 'CAUTION' else '#ffeaa7' if risk_profile.level == 'SUSPICIOUS' else '#f8d7da'}">
@@ -861,24 +549,17 @@ def main():
                 <p style="margin: 0; font-size: 0.9rem;">Model: {risk_profile.pattern_score}% | Entities: {risk_profile.entity_score}%</p>
             </div>
             """, unsafe_allow_html=True)
-            
-            # Confidence bar
             fig_conf = viz_engine.plot_confidence_distribution(risk_profile.confidence)
             st.plotly_chart(fig_conf, use_container_width=True)
-        
-        # Detailed analysis
         st.markdown("---")
         st.markdown("### 🔬 Detailed Signal Analysis")
-        
         col_det1, col_det2 = st.columns([1, 1])
-        
         with col_det1:
             if risk_profile.signals:
                 fig_radar = viz_engine.plot_signal_strength(risk_profile.signals)
                 st.plotly_chart(fig_radar, use_container_width=True)
             else:
                 st.info("No specific scam signals detected")
-        
         with col_det2:
             st.markdown("**📊 Component Scores:**")
             components = {
@@ -887,7 +568,6 @@ def main():
                 "Linguistic Analysis": risk_profile.temporal_features.get('threat_density', 0) * 100,
                 "Combination Bonus": risk_profile.combination_bonus
             }
-            
             for component, score in components.items():
                 st.markdown(f"""
                 <div style="display: flex; justify-content: space-between; margin: 0.5rem 0;">
@@ -895,36 +575,26 @@ def main():
                     <strong>{score:.1f}%</strong>
                 </div>
                 """, unsafe_allow_html=True)
-        
-        # Recommendations
         st.markdown("---")
         st.markdown("### ⚡ Action Recommendations")
-        
-        for i, rec in enumerate(risk_profile.recommendations):
+        for rec in risk_profile.recommendations:
             priority = "critical" if "🆘" in rec else "high" if "🚨" in rec else "medium" if "⚠️" in rec else "low"
             color = {"critical": "#dc3545", "high": "#fd7e14", "medium": "#ffc107", "low": "#28a745"}
-            
             st.markdown(f"""
             <div class="recommendation-box" style="border-left-color: {color[priority]};">
                 <strong>{rec}</strong>
             </div>
             """, unsafe_allow_html=True)
-        
-        # Technical details (expandable)
-        with st.expander("🔧 Technical Details (PhD Level)"):
+        with st.expander("🔧 Technical Details (High Level)"):
             col_tech1, col_tech2 = st.columns([1, 1])
-            
             with col_tech1:
                 st.markdown("**Model Probabilities:**")
                 for label, prob in zip(LABELS, probs):
                     st.write(f"{label}: {prob:.4f}")
-            
             with col_tech2:
                 st.markdown("**Linguistic Features:**")
                 for feature, value in list(risk_profile.temporal_features.items())[:5]:
                     st.write(f"{feature}: {value:.4f}")
-        
-        # Safety information
         st.markdown("---")
         st.markdown("""
         <div style="background: #e3f2fd; padding: 1rem; border-radius: 0.5rem; border-left: 4px solid #2196f3;">
@@ -938,13 +608,12 @@ def main():
             </ul>
         </div>
         """, unsafe_allow_html=True)
-    
-    # Footer
+
     st.markdown("---")
     st.markdown("""
     <p style='text-align: center; color: #6c757d; font-size: 0.9rem;'>
-    🧠 PhD BharatScam Guard - Advanced Research in Indian Fraud Detection<br>
-    Built with PhD-level expertise in Computational Linguistics, Bayesian Inference, and Adversarial ML
+    🧠  BharatScam Guard - Advanced Research in Indian Fraud Detection<br>
+    Built with High level expertise in Computational Linguistics, Bayesian Inference, and Adversarial ML
     </p>
     """, unsafe_allow_html=True)
 
