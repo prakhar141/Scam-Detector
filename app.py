@@ -119,25 +119,20 @@ class BharatScamDetector:
         self.temperature = temperature
         self.base_thresholds = base_thresholds
         self.risk_cache = {}
-        
+
     def extract_entities(self, text: str) -> Dict[str, List[str]]:
-        """Extract relevant entities and patterns"""
         entities = {}
         text_lower = text.lower()
-        
         for entity_type, pattern in ENTITY_PATTERNS.items():
             matches = re.findall(pattern, text_lower, re.IGNORECASE)
             if matches:
                 entities[entity_type] = matches
-                
         return entities
-    
+
     def calculate_pattern_score(self, text: str) -> Tuple[float, List[Dict]]:
-        """Calculate pattern-based risk score with explanations"""
         text_lower = text.lower()
         pattern_matches = []
         total_score = 0
-        
         for scam_type, data in INDIAN_SCAM_PATTERNS.items():
             for pattern in data['patterns']:
                 if re.search(pattern, text_lower, re.IGNORECASE):
@@ -147,52 +142,37 @@ class BharatScamDetector:
                         'description': data['description'],
                         'weight': data['weight']
                     })
-                    break  # One match per category is enough
-        
+                    break
         return total_score, pattern_matches
-    
+
     def adaptive_thresholding(self, probs: np.ndarray) -> np.ndarray:
-        """Senior ML: Context-aware adaptive thresholds"""
         mean_conf = probs.mean()
         std_conf = probs.std()
-        
-        # More sensitive for high-variance signals
         dynamic = self.base_thresholds.copy()
-        
-        # Lower thresholds if we see strong signals in some dimensions
         if mean_conf > 0.4:
-            dynamic -= 0.1  # Be more aggressive when confident
+            dynamic -= 0.1
         elif mean_conf < 0.15:
-            dynamic += 0.05  # Be conservative when uncertain
-        
-        # Adjust for variance
+            dynamic += 0.05
         if std_conf > 0.3:
-            dynamic -= 0.08  # High variance = potential scam
-        
+            dynamic -= 0.08
         return np.clip(dynamic, 0.2, 0.75)
-    
+
     def calculate_combination_multiplier(self, detected_labels: List[str]) -> float:
-        """Senior ML: Certain combinations are extremely suspicious"""
         label_set = set(detected_labels)
-        
-        # Deadly combinations
         if 'authority_name' in label_set and 'threat_type' in label_set:
             return 1.5
         if 'time_pressure' in label_set and 'payment_method' in label_set:
             return 1.4
         if 'authority_name' in label_set and 'time_pressure' in label_set and 'payment_method' in label_set:
             return 1.8
-        
         return 1.0
-    
+
     def predict(self, text: str) -> Dict:
-        """Main prediction pipeline with advanced scoring"""
-        # Cache check
         text_hash = hashlib.md5(text.encode()).hexdigest()
         if text_hash in self.risk_cache:
             return self.risk_cache[text_hash]
-        
-        # 1. Model inference
+
+        # Model inference
         inputs = self.tokenizer(
             text,
             truncation=True,
@@ -200,44 +180,47 @@ class BharatScamDetector:
             max_length=128,
             return_tensors="pt"
         ).to(DEVICE)
-        
+
         with torch.no_grad():
             outputs = self.model(**inputs)
             logits = outputs.logits / self.temperature
             base_probs = torch.sigmoid(logits).cpu().numpy()[0]
-        
-        # 2. Adaptive thresholding
+
+        # Define mean_conf to fix NameError
+        mean_conf = base_probs.mean()
+
+        # Adaptive thresholding
         thresholds = self.adaptive_thresholding(base_probs)
         detected = [LABELS[i] for i, v in enumerate(base_probs > thresholds) if v]
-        
-        # 3. Pattern detection
+
+        # Pattern detection
         pattern_score, pattern_matches = self.calculate_pattern_score(text)
         entities = self.extract_entities(text)
-        
-        # 4. Calculate base risk score
+
+        # Base risk calculation
         if len(detected) == 0:
             base_risk = 0
         elif len(detected) == 1:
-            base_risk = np.max(base_probs) * 30  # Max 30 for single signal
+            base_risk = np.max(base_probs) * 30
         else:
-            base_risk = (np.sum(base_probs) / len(base_probs)) * 50  # Weighted average
-        
-        # 5. Apply combination multipliers
+            base_risk = (np.sum(base_probs) / len(base_probs)) * 50
+
+        # Combination multiplier
         combo_multiplier = self.calculate_combination_multiplier(detected)
-        
-        # 6. Pattern bonus (very strong signal)
-        pattern_bonus = min(pattern_score * 12, 40)  # Cap at 40%
-        
-        # 7. Urgency penalty
+
+        # Pattern bonus
+        pattern_bonus = min(pattern_score * 12, 40)
+
+        # Urgency penalty
         urgency_penalty = 0
         if re.search(ENTITY_PATTERNS['urgency_words'], text, re.IGNORECASE):
             urgency_penalty = 15
-        
-        # 8. Final risk score
+
+        # Final risk score
         risk_score = (base_risk * combo_multiplier) + pattern_bonus + urgency_penalty
         risk_score = min(risk_score, 100)
-        
-        # 9. Verdict logic
+
+        # Verdict
         if risk_score < 25:
             verdict = "🟢 SAFE"
             risk_level = "SAFE"
@@ -250,10 +233,10 @@ class BharatScamDetector:
         else:
             verdict = "🔴 CONFIRMED SCAM"
             risk_level = "SCAM"
-        
-        # 10. Confidence calculation
+
+        # Confidence calculation using mean_conf
         confidence = min((mean_conf * 100) + (pattern_score * 10), 95) if detected else mean_conf * 100
-        
+
         result = {
             'verdict': verdict,
             'risk_level': risk_level,
@@ -265,7 +248,7 @@ class BharatScamDetector:
             'entities': entities,
             'thresholds_used': {lbl: float(t) for lbl, t in zip(LABELS, thresholds)}
         }
-        
+
         self.risk_cache[text_hash] = result
         return result
 
