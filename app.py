@@ -39,8 +39,8 @@ ARTEFACTS = [
     "special_tokens_map.json",
     "vocab.json",
     "merges.txt",
-    "scam_v1.json",
-    "extreme_distribution.json",   # <-- new, see calibration notebook
+    "scam_v1.json"
+       
 ]
 
 def _download():
