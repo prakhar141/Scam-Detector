@@ -479,16 +479,16 @@ def main():
     <div class="phd-header">
         <h1>🧠  BharatScam Guard</h1>
         <p>Advanced Multi-Modal Fraud Detection System for Indian Digital Ecosystem</p>
-        <p><em>Powered by PhD-level Research in Computational Linguistics & Bayesian Risk Analysis</em></p>
+        <p><em>Powered by High-level Research in Computational Linguistics & Bayesian Risk Analysis</em></p>
     </div>
     """, unsafe_allow_html=True)
 
     with st.sidebar:
-        st.markdown("### 🧪  Research Features")
-        with st.expander("🔬 Advanced Settings", expanded=False):
-            pattern_weight = st.slider("Pattern Matching Weight", 0.1, 0.5, 0.3, 0.05)
-            entity_weight = st.slider("Entity Recognition Weight", 0.05, 0.3, 0.15, 0.05)
-            linguistic_weight = st.slider("Linguistic Features Weight", 0.05, 0.2, 0.1, 0.05)
+        #st.markdown("### 🧪  Research Features")
+        #with st.expander("🔬 Advanced Settings", expanded=False):
+            #pattern_weight = st.slider("Pattern Matching Weight", 0.1, 0.5, 0.3, 0.05)
+            #entity_weight = st.slider("Entity Recognition Weight", 0.05, 0.3, 0.15, 0.05)
+            #linguistic_weight = st.slider("Linguistic Features Weight", 0.05, 0.2, 0.1, 0.05)
         st.markdown("### 📚 Research Citations")
         st.info("""
         **Detection Methods:**
@@ -514,7 +514,7 @@ def main():
             "Safe Message": "Hi, are we still meeting for lunch today? Let me know if you're running late. See you at 1 PM!",
             "Lottery Scam": "🎉 CONGRATULATIONS! You won ₹1 Crore in KBC WhatsApp Lottery! To claim, send ₹25,000 processing fee to this Paytm number: 9876543210"
         }
-        selected_example = st.selectbox("📋 Load Example Message", ["Custom"] + list(examples.keys()))
+        #selected_example = st.selectbox("📋 Load Example Message", ["Custom"] + list(examples.keys()))
         example_text = examples.get(selected_example, "")
         user_text = st.text_area("✏️ Enter SMS, WhatsApp, or Email message:", value=example_text, height=150,
                                  placeholder="Paste your message here for PhD-level analysis...", key="message_input")
@@ -526,7 +526,7 @@ def main():
         if len(user_text) < 10:
             st.warning("⚠️ Message too short for meaningful analysis. Please enter at least 10 characters.")
             return
-        with st.spinner("🧠 Running PhD-level analysis pipeline..."):
+        with st.spinner("🧠 Running High-level analysis pipeline..."):
             detector = load_phD_detector()
             inputs = detector['tokenizer'](user_text, truncation=True, padding=True, max_length=128, return_tensors="pt").to(DEVICE)
             with torch.no_grad():
@@ -552,21 +552,21 @@ def main():
             fig_conf = viz_engine.plot_confidence_distribution(risk_profile.confidence)
             st.plotly_chart(fig_conf, use_container_width=True)
         st.markdown("---")
-        st.markdown("### 🔬 Detailed Signal Analysis")
-        col_det1, col_det2 = st.columns([1, 1])
-        with col_det1:
-            if risk_profile.signals:
-                fig_radar = viz_engine.plot_signal_strength(risk_profile.signals)
-                st.plotly_chart(fig_radar, use_container_width=True)
+       # st.markdown("### 🔬 Detailed Signal Analysis")
+        #col_det1, col_det2 = st.columns([1, 1])
+       # with col_det1:
+           # if risk_profile.signals:
+               # fig_radar = viz_engine.plot_signal_strength(risk_profile.signals)
+                #st.plotly_chart(fig_radar, use_container_width=True)
             else:
                 st.info("No specific scam signals detected")
         with col_det2:
-            st.markdown("**📊 Component Scores:**")
-            components = {
-                "Pattern Matching": risk_profile.pattern_score,
-                "Entity Recognition": risk_profile.entity_score,
-                "Linguistic Analysis": risk_profile.temporal_features.get('threat_density', 0) * 100,
-                "Combination Bonus": risk_profile.combination_bonus
+            #st.markdown("**📊 Component Scores:**")
+            #components = {
+                #"Pattern Matching": risk_profile.pattern_score,
+                #"Entity Recognition": risk_profile.entity_score,
+                #"Linguistic Analysis": risk_profile.temporal_features.get('threat_density', 0) * 100,
+                #"Combination Bonus": risk_profile.combination_bonus
             }
             for component, score in components.items():
                 st.markdown(f"""
