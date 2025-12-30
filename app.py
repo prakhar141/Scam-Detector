@@ -517,7 +517,7 @@ def main():
         selected_example = st.selectbox("📋 Load Example Message", ["Custom"] + list(examples.keys()))
         example_text = examples.get(selected_example, "")
         user_text = st.text_area("✏️ Enter SMS, WhatsApp, or Email message:", value=example_text, height=150,
-                                 placeholder="Paste your message here for PhD-level analysis...", key="message_input")
+                                 placeholder="Paste your message here for High-level analysis...", key="message_input")
         analyze_col, clear_col = st.columns([1, 4])
         with analyze_col:
             analyze_clicked = st.button("🧠 Analyze", type="primary", use_container_width=True)
