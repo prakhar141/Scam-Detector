@@ -545,8 +545,8 @@ def main():
             st.markdown(f"""
             <div class="risk-card" style="background: {'#d4edda' if risk_profile.level == 'SAFE' else '#fff3cd' if risk_profile.level == 'CAUTION' else '#ffeaa7' if risk_profile.level == 'SUSPICIOUS' else '#f8d7da'}">
                 <h3 style="margin: 0;">{risk_profile.level}</h3>
-                <p style="margin: 0.5rem 0;"><strong>Confidence: {risk_profile.confidence}%</strong></p>
-                <p style="margin: 0; font-size: 0.9rem;">Model: {risk_profile.pattern_score}% | Entities: {risk_profile.entity_score}%</p>
+                
+                
             </div>
             """, unsafe_allow_html=True)
             fig_conf = viz_engine.plot_confidence_distribution(risk_profile.confidence)
@@ -560,7 +560,7 @@ def main():
                 #st.plotly_chart(fig_radar, use_container_width=True)
            # else:
                # st.info("No specific scam signals detected")
-        with col_det2:
+        #with col_det2:
             #st.markdown("**📊 Component Scores:**")
             #components = {
                 #"Pattern Matching": risk_profile.pattern_score,
