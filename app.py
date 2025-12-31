@@ -23,7 +23,7 @@ from datetime import datetime
 # PhD-Level Configuration & Constants
 # --------------------------------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-REPO_ID = "prakhar146/Scam"
+REPO_ID = "prakhar146/Scamming"
 LOCAL_DIR = Path("./hf_model_ph")
 LOCAL_DIR.mkdir(exist_ok=True)
 
