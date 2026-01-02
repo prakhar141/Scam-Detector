@@ -19,6 +19,9 @@ import nltk
 from nltk.tokenize import sent_tokenize
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import torch
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # Configure academic-grade logging
 logging.basicConfig(
