@@ -78,7 +78,6 @@ class TrustAnchorEngine:
             matches = re.findall(pat, text, re.I)
             if matches:
                 hits.append(f"✓ {name.replace('_',' ').title()}: {len(matches)}")
-                # Scoring weights
                 weights = {
                     "bank_official": 0.35,
                     "govt_official": 0.35,
@@ -93,58 +92,46 @@ class VerifiableClaimsEngine:
     """Decompose text into verifiable claims"""
     def extract_claims(self, text:str) -> List[Claim]:
         claims = []
-        # Financial
         for m in re.findall(r'\b(?:₹|Rs\.?|INR)\s*[\d,]+|\b\d{6,}\b', text):
             claims.append(Claim(m,"financial"))
-        # Temporal
         for m in re.findall(r'\b(?:today|tomorrow|yesterday|within\s+\d+\s+(?:hour|day|week)s?)\b', text):
             claims.append(Claim(m,"temporal"))
-        # Identity
         for m in re.findall(r'\b(?:RBI|NPCI|UIDAI|IT Department|HDFC|ICICI|SBI|AXIS|KOTAK|Government|Police|CIBIL)\b', text):
             claims.append(Claim(m,"identity"))
-        # Action
         for m in re.findall(r'\b(?:click|pay|transfer|send|share|update|verify)\s+(?:link|amount|money|details|OTP|UPI|account)\b', text):
             claims.append(Claim(m,"action"))
         return claims
 
     def score_verifiability(self, claims:List[Claim]) -> Tuple[float, List[str]]:
-        details = []
-        verified = 0
+        details, verified = [], 0
         for c in claims:
             if c.type=="financial" and re.search(r'\d{6,}',c.text):
-                c.verifiability = 0.8
-                verified+=1
+                c.verifiability = 0.8; verified+=1
                 details.append(f"💰 '{c.text}' financial claim verifiable")
             elif c.type=="temporal":
                 c.verifiability = 0.3
                 details.append(f"⏰ '{c.text}' temporal claim low verifiability")
             elif c.type=="identity":
                 c.verifiability = 0.7 if re.search(r'\b(?:RBI|NPCI|UIDAI|IT Department)\b',c.text) else 0.1
-                details.append(f"🏛️ '{c.text}' identity claim verifiability={c.verifiability}")
                 if c.verifiability>0.5: verified+=1
+                details.append(f"🏛️ '{c.text}' identity claim verifiability={c.verifiability}")
             elif c.type=="action":
                 c.verifiability = 0.6 if any(w in c.text.lower() for w in ['app','portal','website','official']) else 0.0
-                details.append(f"✅ '{c.text}' action claim verifiability={c.verifiability}")
                 if c.verifiability>0.5: verified+=1
+                details.append(f"✅ '{c.text}' action claim verifiability={c.verifiability}")
         return verified/len(claims) if claims else 0.0, details
 
 class SemanticCoherenceEngine:
     """Detects confusion tactics"""
     def score(self,text:str) -> Tuple[float,List[str]]:
         score, issues = 0.0, []
-        # Conflicting urgencies
         urgencies = set(re.findall(r'\b(immediately|now|within\s+\d+|asap|by\s+\d+)\b',text))
-        if len(urgencies)>2:
-            score+=0.3; issues.append(f"🕒 Conflicting urgencies: {urgencies}")
-        # Authority overload
+        if len(urgencies)>2: score+=0.3; issues.append(f"🕒 Conflicting urgencies: {urgencies}")
         auths = re.findall(r'\b(RBI|Government|Police|Bank|IT Dept|Court)\b',text)
         if len(auths)>=3: score+=0.25; issues.append(f"🏛️ Multiple authorities: {auths}")
-        # Long sentences
         if any(len(s.split())>25 for s in re.split(r'[.!?]',text)): score+=0.15; issues.append("📜 Long/confusing sentences")
-        # Emotional imbalance
         emotion = len(re.findall(r'\b(urgent|immediately|freeze|arrest|cancel|terminate)\b',text))
-        factual = len(re.findall(r'\b(reference|transaction|account|number|date|time)\b',text))
-        if factual==0: factual=1
+        factual = len(re.findall(r'\b(reference|transaction|account|number|date|time)\b',text)) or 1
         if emotion>factual*2: score+=0.3; issues.append(f"😱 Emotion vs facts imbalance: {emotion}/{factual}")
         return min(score,1.0), issues
 
@@ -177,41 +164,24 @@ class CoreOrchestrator:
             logits = mdl(**inputs).logits/self.T
             probs = torch.sigmoid(logits).cpu().numpy()[0]
         
-        # Traditional scam signals
         detected = probs>self.thres
         scam_signals = probs[detected].mean() if detected.any() else probs.max()*0.25
         
-        # Legitimacy anchors
         leg_score, leg_proof = self.trust.score(text)
-        
-        # Verifiable claims
         claims_list = self.claims.extract_claims(text)
         ver_score, claim_details = self.claims.score_verifiability(claims_list)
-        
-        # Semantic coherence
         incoh_score, incoh_issues = self.coherence.score(text)
         
-        # Multiplicative risk formula
         risk = scam_signals*(1-leg_score)**2*(1-ver_score)*(1+0.5*incoh_score)
-        
-        # ============================================================
-        # ADAPTIVE THRESHOLDING
-        # ============================================================
         base_thresh = np.array([0.25,0.5,0.75])
         adaptive_thresh = base_thresh*(1-leg_score)*(1-0.5*ver_score)+0.2*incoh_score
-        # Determine level dynamically
         if risk<adaptive_thresh[0]: level="SAFE"
         elif risk<adaptive_thresh[1]: level="CAUTION"
         elif risk<adaptive_thresh[2]: level="SUSPICIOUS"
         else: level="SCAM"
         
-        # Confidence
         conf = (1-np.std(probs))*100
-        
-        # Trigger details
         triggers = {label:float(p) for label,p,det in zip(CP_AFT_LABELS,probs,detected) if det}
-        
-        # Recommendations based on legitimacy & risk
         if leg_score>0.6:
             recos = ["✅ Official trust anchors detected","📞 Verify on official portal","🔍 Check reference numbers"]
         elif risk>0.5:
@@ -219,44 +189,71 @@ class CoreOrchestrator:
         else:
             recos = ["⏳ Pause before acting","🤔 Can I verify without replying?"]
         
-        return RiskProfile(round(risk*100,2),level,round(conf,2),triggers,recos,leg_proof,claim_details,incoh_issues)
+        return RiskProfile(round(float(risk*100),2),level,round(float(conf),2),
+                           triggers,recos,leg_proof,claim_details,incoh_issues)
 
 # ============================================================
-# STREAMLIT UI
+# STREAMLIT UI (UX/PhD Level)
 # ============================================================
 def init_state():
     for k in ["msg","profile","stage"]:
         if k not in st.session_state: st.session_state[k]=None
 
 def main():
-    st.set_page_config(page_title="BharatScam Guardian",page_icon="🛡️",layout="centered")
+    st.set_page_config(page_title="BharatScam Guardian", page_icon="🛡️", layout="wide")
+    st.markdown("<style>div.stButton>button{width:100%;font-size:16px}</style>", unsafe_allow_html=True)
     init_state()
-    st.header("🛡️ BharatScam Guardian — Legitimacy First, Risk Second")
-    msg = st.text_area("Paste any message here",height=200)
-    if st.button("Analyze") and msg.strip():
-        st.session_state.msg = msg
-        st.session_state.stage="RUNNING"
-        st.rerun()
     
+    st.title("🛡️ BharatScam Guardian")
+    st.subheader("Legitimacy First, Risk Second — Powered by CP-AFT")
+    
+    msg = st.text_area("Paste any message here", height=200, placeholder="Copy the suspicious message...")
+    
+    col1, col2 = st.columns([3,1])
+    with col1:
+        if st.button("🔍 Analyze Message") and msg.strip():
+            st.session_state.msg = msg
+            st.session_state.stage = "RUNNING"
+            st.rerun()
+    with col2:
+        st.info("Tip: Always verify official references and links.")
+
     if st.session_state.stage=="RUNNING":
-        progress=st.progress(0)
-        for i in range(100): progress.progress(i+1); time.sleep(0.01)
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        for i in range(100):
+            progress_bar.progress(i+1)
+            status_text.text(f"Analyzing... {i+1}%")
+            time.sleep(0.005)
         orch = CoreOrchestrator(*load_model()[2:])
         profile = orch.infer(st.session_state.msg)
-        st.session_state.profile=profile
-        st.session_state.stage="DONE"
+        st.session_state.profile = profile
+        st.session_state.stage = "DONE"
         st.rerun()
-    
+
     if st.session_state.stage=="DONE" and st.session_state.profile:
-        p=st.session_state.profile
-        st.markdown(f"### Risk Score: {p.score}% — {p.level}")
+        p = st.session_state.profile
+        st.markdown(f"### Risk Score: **{p.score}% — {p.level}**")
         st.progress(float(p.score)/100.0)
-        if p.legitimacy_proof: st.markdown("#### ✅ Legitimacy Anchors"); [st.markdown(f"- {x}") for x in p.legitimacy_proof]
-        if p.claim_analysis: st.markdown("#### 🔬 Claim Verifiability"); [st.markdown(f"- {x}") for x in p.claim_analysis]
-        if p.coherence_issues: st.markdown("#### ⚠️ Coherence Issues"); [st.markdown(f"- {x}") for x in p.coherence_issues]
-        if p.triggers: st.markdown("#### 🎯 Detected Scam Triggers"); [st.markdown(f"- {k}: {v:.1%}") for k,v in p.triggers.items()]
-        st.markdown("#### Recommended Actions"); [st.markdown(f"- {r}") for r in p.recos]
-        if st.button("Analyze New Message"): st.session_state.update({"msg":None,"profile":None,"stage":None}); st.rerun()
+        
+        st.markdown("#### ✅ Legitimacy Anchors")
+        for x in p.legitimacy_proof: st.success(x)
+        
+        st.markdown("#### 🔬 Claim Verifiability")
+        for x in p.claim_analysis: st.info(x)
+        
+        st.markdown("#### ⚠️ Semantic / Coherence Issues")
+        for x in p.coherence_issues: st.warning(x)
+        
+        st.markdown("#### 🎯 Detected Scam Triggers")
+        for k,v in p.triggers.items(): st.error(f"{k}: {float(v):.1%}")
+        
+        st.markdown("#### Recommended Actions")
+        for r in p.recos: st.write(f"- {r}")
+        
+        if st.button("🔄 Analyze New Message"):
+            st.session_state.update({"msg":None,"profile":None,"stage":None})
+            st.experimental_rerun()
 
 if __name__=="__main__":
     main()
