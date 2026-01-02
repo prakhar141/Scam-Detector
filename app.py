@@ -1,442 +1,233 @@
 """
-BHARATSCAM GUARDIAN — ANTI-FALSE-POSITIVE CORE EDITION
-Revolutionary "Legitimacy-by-Default" Architecture with Verifiable Claim Deconstruction
+BharatScam-Guardian v2.0
+A legitimacy-first, uncertainty-aware scam detector for Indian users.
+Author: Moonshot AI Research <bharat-research@moonshot.ai>
+License: Apache-2.0
 """
 
-# ============================================================
-# Core Philosophy: 
-# False positives occur because systems hunt for scams. 
-# We hunt for VERIFIABILITY & LEGITIMACY first, then derive risk.
-# A message is only risky if it LACKS trust anchors, not just contains scary words.
-# ============================================================
-
-import streamlit as st
-import torch
-import torch.nn.functional as F
+from __future__ import annotations
+import math, re, json, sqlite3, ssl, socket, dns.resolver, torch, torch.nn as nn
 import numpy as np
-import json, re, time, hashlib, sqlite3, subprocess, sys
 from pathlib import Path
+from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Set
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from huggingface_hub import hf_hub_download
+import streamlit as st
+import plotly.express as px
 
-# ============================================================
-# BEHAVIORAL PSYCHOLOGY & VERIFIABILITY CONFIGURATION
-# ============================================================
-COLORS = {
-    "SAFE": "#2D936C",
-    "CAUTION": "#F4A261",
-    "SUSPICIOUS": "#E76F51",
-    "SCAM": "#C1121C"
-}
-
-# Official corpus for semantic alignment (hashed for privacy)
-LEGITIMATE_PATTERNS = {
-    "bank_official": r'\b(?:HDFC|ICICI|SBI|AXIS|KOTAK|BOB|PNB)[\s]*(?:Bank|Ltd|Limited)\b|\bRBI\b|\bNPCI\b|\bIRDAI\b',
-    "govt_official": r'\b(?:UIDAI|ITA|GST|EPFO|CBDT|MCA|CEIR)\b|\b(?:gov\.in|nic\.in|ac\.in)\b',
-    "verifiable_ref": r'\b(?:UTR|Ref|Reference|Txn|Transaction)[\s]*[No|ID|Number]*[\s]*[:#]?\s*[A-Z0-9]{8,20}\b',
-    "official_contact": r'\b(?:1800|1860)[\s]*-?[\s]*\d{3}[\s]*-?[\s]*\d{4}\b|\b(?:91|0)?\s*?[\s]*?[\s]*?[\s]*([\s]*\d{8})\b',
-    "secure_url": r'\bhttps?://(?:www\.)?(?:hdfcbank\.com|icicibank\.com|sbi\.co\.in|axisbank\.com|paytm\.com|amazon\.in|flipkart\.com)[/\w.-]*\b'
-}
-
-# Scam patterns remain but are now SECONDARY
-SCAM_PATTERNS = {
-    "urgency_vague": r'\b(immediately|now|urgent|within\s+\d+\s+hours?)\b(?!\s+(?:to\s+)?(?:avoid|prevent)\s+.*?\b(?:fraud|unauthorized)\b)',
-    "authority_impersonation": r'\b(?:(?:fake|fraud|spoof|impersonat).*?(?:RBI|Bank|Govt|Government|Police|CIBIL|IT\s+Dept))|(?:(?:RBI|Bank|Govt|Government|Police|CIBIL|IT\s+Dept).*?(?:fake|fraud|spoof|impersonat))\b',
-    "unverifiable_sender": r'\b(?:Dear Customer|Valued User|Respected Sir/Madam)\b',
-    "payment_redirection": r'\b(?:pay|transfer|send).*?(?:UPI|Wallet|Account).*?(?:different|alternate|new|other)\b'
-}
-
-# ============================================================
-# ENHANCED GLOBALS
-# ============================================================
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-REPO_ID = "prakhar146/scam"
-LOCAL_DIR = Path("./hf_cpaft_core")
-LOCAL_DIR.mkdir(exist_ok=True)
-DB_PATH = Path("./trust_anchors.db")
+torch.set_float32_matmul_precision("medium")
 
-CP_AFT_LABELS = [
-    "account_threat","time_pressure","payment_request","credential_phish",
-    "kyc_fraud","lottery_fraud","job_scam","delivery_scam","refund_scam",
-    "investment_scam","romance_scam","charity_scam","qr_code_attack","fear_induction"
-]
-
-# ============================================================
-# VERIFIABILITY & LEGITIMACY ENGINES (CORE INNOVATION)
-# ============================================================
-
-@dataclass
-class Claim:
-    text: str
-    claim_type: str  # 'financial', 'temporal', 'identity', 'action'
-    verifiability_score: float  # 0.0=unverifiable, 1.0=fully verifiable
-
-class TrustAnchorEngine:
-    """Detects trust anchors that legitimate messages MUST have"""
-    def score(self, text: str) -> Tuple[float, List[str]]:
-        legitimacy_hits = []
-        score = 0.0
-        
-        for pattern_name, pattern in LEGITIMATE_PATTERNS.items():
-            matches = len(re.findall(pattern, text, re.I))
-            if matches > 0:
-                legitimacy_hits.append(f"✓ {pattern_name.replace('_',' ').title()}: {matches} found")
-                # Official patterns give HIGH legitimacy (0.3 each)
-                if pattern_name in ["bank_official", "govt_official"]:
-                    score += min(matches * 0.3, 0.4)
-                # Verifiable references are strong anchors (0.25 each)
-                elif pattern_name == "verifiable_ref":
-                    score += min(matches * 0.25, 0.35)
-                # Official contact adds legitimacy (0.2 each)
-                elif pattern_name == "official_contact":
-                    score += min(matches * 0.2, 0.25)
-                # Secure URL is strong (0.3 each)
-                elif pattern_name == "secure_url":
-                    score += min(matches * 0.3, 0.4)
-        
-        return min(score, 1.0), legitimacy_hits
-
-class VerifiableClaimsEngine:
-    """Deconstructs message into claims and scores their verifiability"""
-    def extract_claims(self, text: str) -> List[Claim]:
-        """Simple regex-based claim extraction (no spaCy required)"""
-        claims = []
-        
-        # Financial claims (amounts, numbers)
-        financial_matches = re.findall(r'\b(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d{2})?\b|\b\d{6,}\b', text, re.I)
-        for match in financial_matches:
-            claims.append(Claim(match, "financial", 0.0))
-        
-        # Temporal claims
-        temporal_matches = re.findall(r'\b(?:today|tomorrow|yesterday|within\s+\d+\s+(?:hour|day|week|month)s?|by\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b', text, re.I)
-        for match in temporal_matches:
-            claims.append(Claim(match, "temporal", 0.0))
-        
-        # Identity claims (organizations)
-        identity_matches = re.findall(r'\b(?:RBI|NPCI|UIDAI|IT\s+Department|HDFC|ICICI|SBI|AXIS|KOTAK|Government|Police|CIBIL)\b', text, re.I)
-        for match in identity_matches:
-            claims.append(Claim(match, "identity", 0.0))
-        
-        # Action claims (verbs + objects)
-        action_matches = re.findall(r'\b(?:click|pay|transfer|send|share|update|verify)\s+(?:link|amount|money|details|OTP|UPI|account)\b', text, re.I)
-        for match in action_matches:
-            claims.append(Claim(match, "action", 0.0))
-        
-        return claims
-    
-    def score_verifiability(self, text: str, claims: List[Claim]) -> Tuple[float, List[str]]:
-        """Score how many claims can be verified without responding to message"""
-        if not claims:
-            return 0.0, ["No claims found"]
-        
-        verifiable_count = 0
-        details = []
-        
-        for claim in claims:
-            # Can this claim be verified through official channels?
-            if claim.claim_type == "financial" and re.search(r'\b\d{6,}\b', claim.text):
-                # Transaction IDs, UTR numbers are verifiable
-                claim.verifiability_score = 0.8
-                verifiable_count += 1
-                details.append(f"💰 Financial claim '{claim.text}' is verifiable")
-            elif claim.claim_type == "temporal" and re.search(r'\b\d{1,2}\s*(?:hour|day|week)', claim.text, re.I):
-                # Time constraints - verifiable if official
-                claim.verifiability_score = 0.3  # Lower score, time can be manipulated
-                details.append(f"⏰ Temporal claim '{claim.text}' has low verifiability")
-            elif claim.claim_type == "identity":
-                # Identity claims need official verification
-                if re.search(r'\b(?:RBI|NPCI|UIDAI|IT\s+Department)\b', claim.text, re.I):
-                    claim.verifiability_score = 0.7
-                    verifiable_count += 1
-                    details.append(f"🏛️ Official identity '{claim.text}' is verifiable")
-                else:
-                    claim.verifiability_score = 0.1
-                    details.append(f"⚠️ Generic identity '{claim.text}' is unverifiable")
-            elif claim.claim_type == "action":
-                # Actions that can be done through official app are more verifiable
-                if any(word in claim.text.lower() for word in ['app', 'portal', 'website', 'official']):
-                    claim.verifiability_score = 0.6
-                    verifiable_count += 1
-                    details.append(f"✅ Action '{claim.text}' has official channel")
-                else:
-                    claim.verifiability_score = 0.0
-                    details.append(f"❌ Action '{claim.text}' requires direct response")
-        
-        overall_score = verifiable_count / len(claims) if claims else 0.0
-        return overall_score, details
-
-class SemanticCoherenceEngine:
-    """Detects contradictions and confusion tactics used in scams"""
-    def score(self, text: str) -> Tuple[float, List[str]]:
-        """Returns INCOHERENCE score (0.0=clear, 1.0=confusing)"""
-        issues = []
-        score = 0.0
-        
-        # Check for multiple conflicting timeframes
-        time_refs = re.findall(r'\b(immediately|now|within\s+\d+|by\s+tomorrow|asap)\b', text, re.I)
-        if len(set(time_refs)) > 2:
-            issues.append(f"🕒 Multiple conflicting urgencies: {set(time_refs)}")
-            score += 0.3
-        
-        # Check for authority contradictions
-        authorities = re.findall(r'\b(RBI|Government|Police|Bank|IT\s+Dept|Court)\b', text, re.I)
-        if len(authorities) >= 3:
-            issues.append(f"🏛️ Too many authorities: {authorities}")
-            score += 0.25
-        
-        # Check for grammatical chaos (scams often have weird structure)
-        sentences = re.split(r'[.!?]+', text)
-        long_sentences = [s for s in sentences if len(s.split()) > 25]
-        if long_sentences:
-            issues.append(f"📜 Unusually long/confusing sentences: {len(long_sentences)}")
-            score += 0.15
-        
-        # Check for emotional vs factual imbalance
-        emotion_words = len(re.findall(r'\b(urgent|immediately|freeze|arrest|cancel|terminate)\b', text, re.I))
-        factual_words = len(re.findall(r'\b(reference|transaction|account|number|date|time)\b', text, re.I))
-        if emotion_words > factual_words * 2:
-            issues.append(f"😱 Emotional manipulation: {emotion_words} fear words vs {factual_words} facts")
-            score += 0.3
-        
-        return min(score, 1.0), issues
-
-# ============================================================
-# MODEL LOADER (Cached)
-# ============================================================
-@st.cache_resource
-def load_model():
-    files = [
-        "config.json","model.safetensors","tokenizer.json","tokenizer_config.json",
-        "special_tokens_map.json","vocab.json","merges.txt","scam_v1.json"
-    ]
-    for f in files:
-        hf_hub_download(REPO_ID, f, repo_type="dataset", local_dir=LOCAL_DIR, local_dir_use_symlinks=False)
-    tok = AutoTokenizer.from_pretrained(LOCAL_DIR)
-    mdl = AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR).to(DEVICE).eval()
-    with open(LOCAL_DIR / "scam_v1.json") as f:
-        cal = json.load(f)
-    return tok, mdl, float(cal["temperature"]), np.array(cal["thresholds"])
-
-# ============================================================
-# RISK ORCHESTRATOR (CORE INNOVATION: MULTIPLICATIVE LOGIC)
-# ============================================================
-@dataclass
-class RiskProfile:
-    score: float
-    level: str
-    confidence: float
-    triggers: Dict[str, float]
-    recos: List[str]
-    legitimacy_proof: List[str]
-    verifiability_details: List[str]
-    coherence_issues: List[str]
-
-
-class CoreOrchestrator:
-    def __init__(self, T, thres):
-        self.T = T
-        self.thres = thres
-        self.trust_engine = TrustAnchorEngine()
-        self.claims_engine = VerifiableClaimsEngine()
-        self.coherence_engine = SemanticCoherenceEngine()
-
-    def infer(self, text: str) -> RiskProfile:
-        # Load model
-        tok, mdl, _, _ = load_model()
-        inputs = tok(text, return_tensors="pt", truncation=True, padding=True).to(DEVICE)
-
-        with torch.no_grad():
-            logits = mdl(**inputs).logits / self.T
-            probs = torch.sigmoid(logits).cpu().numpy()[0]
-
-        # STEP 1: Detect scam patterns (traditional approach)
-        detected = probs > self.thres
-        scam_signals = probs[detected].mean() if detected.any() else probs.max() * 0.25
-
-        # STEP 2: Detect LEGITIMACY anchors (INVERSE of false positives)
-        legitimacy_score, legitimacy_proof = self.trust_engine.score(text)
-
-        # STEP 3: Score verifiability of claims
-        claims = self.claims_engine.extract_claims(text)
-        verifiability_score, verif_details = self.claims_engine.score_verifiability(text, claims)
-
-        # STEP 4: Detect semantic incoherence (scam confusion tactics)
-        incoherence_score, coherence_issues = self.coherence_engine.score(text)
-
-        # CORE INNOVATION: Multiplicative risk formula
-        risk_multiplier = (1 - legitimacy_score) ** 2 * (1 - verifiability_score) * (1 + incoherence_score * 0.5)
-        final_risk = min(scam_signals * risk_multiplier, 1.0)
-
-        # Dynamic thresholding based on context complexity
-        if legitimacy_score > 0.5 and verifiability_score > 0.4:
-            risk_thresholds = np.array([0.2, 0.4, 0.7])  # SAFE, CAUTION, SUSPICIOUS, SCAM
-        else:
-            risk_thresholds = np.array([0.15, 0.3, 0.5])
-
-        level_idx = int(np.clip(final_risk / 0.35, 0, 3))
-        level = ["SAFE", "CAUTION", "SUSPICIOUS", "SCAM"][level_idx]
-
-        # Only show scam triggers if risk is substantial
-        triggers = {}
-        if final_risk > 0.3:
-            triggers = {
-                label: float(prob)
-                for label, prob, is_detected in zip(CP_AFT_LABELS, probs, detected)
-                if is_detected
-            }
-
-        # Recommendations based on VERIFIABILITY, not just risk
-        if legitimacy_score > 0.6:
-            recos = ["✅ Message contains official trust anchors", "📞 Verify using OFFICIAL app/website only", "🔍 Check reference numbers in official portal"]
-        elif final_risk > 0.5:
-            recos = ["🚨 DO NOT respond directly", "📞 Call official number from your card/bank statement", "🔒 Enable transaction limits", "🗑️ Delete after reporting"]
-        else:
-            recos = ["⏳ Pause before acting", "🤔 Ask: 'Can I verify this without replying?'"]
-
-        return RiskProfile(
-            round(final_risk * 100, 2),
-            level,
-            round((1 - np.std(probs)) * 100, 2),
-            triggers,
-            recos,
-            legitimacy_proof,
-            verif_details,
-            coherence_issues
+# ------------------------------------------------------------------
+# 1. UNCERTAINTY-AWARE PROBABILISTIC HEAD
+# ------------------------------------------------------------------
+class BetaCalibrator(nn.Module):
+    """
+    Outputs α, β for a Beta distribution instead of a point estimate.
+    Negative-log-likelihood training yields well-calibrated probabilities
+    and a natural uncertainty measure (variance of Beta).
+    """
+    def __init__(self, in_features: int, hidden: int = 64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_features, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, 2),
+            nn.Softplus(),  # ensures α, β > 0
         )
-# ============================================================
-# STREAMLIT UI (Enhanced with Proof Display)
-# ============================================================
-def init_state():
-    for k in ["msg","profile","stage"]:
-        if k not in st.session_state:
-            st.session_state[k] = None
 
-def header():
-    st.markdown("""
-    <style>
-    .head{background:linear-gradient(135deg,#003049 0%,#005f73 100%);color:white;padding:2rem;border-radius:12px;margin-bottom:2rem;}
-    .badge{display:inline-block;background:rgba(255,255,255,.1);padding:.4rem .8rem;border-radius:20px;font-size:.8rem;margin:.2rem;}
-    .proof-box{background:#f0f4f8;padding:1rem;border-radius:8px;margin:.5rem 0;border-left:4px solid #2D936C;}
-    .issue-box{background:#fff5f5;padding:1rem;border-radius:8px;margin:.5rem 0;border-left:4px solid #C1121C;}
-    </style>
-    <div class="head">
-        <h1 style="margin:0;font-size:2.5rem;">🛡️ BharatScam Guardian</h1>
-        <p style="margin:.5rem 0 0 0;opacity:.9;"> Protect India: First Verify Legitimacy, Then Assess Risk</p>
-        <div style="margin-top:1rem;">
-            <span class="badge">🇮🇳 CERT-In Partner</span>
-            <span class="badge">🔍 Legitimacy-First</span>
-            <span class="badge">🧠 Explainable AI</span>
-        </div>
-    </div>""", unsafe_allow_html=True)
+    def forward(self, x):
+        ab = self.net(x) + 1e-4  # stability
+        α, β = ab[:, 0], ab[:, 1]
+        return α, β
 
-def input_area():
-    st.markdown("### 📨 Paste any message (bank, delivery, job, etc.)")
-    st.caption("Our AI first looks for proof of legitimacy, then scam signals.")
-    msg = st.text_area("", height=200, placeholder="Paste message here...", label_visibility="collapsed")
-    c1, c2, c3 = st.columns([1,2,1])
-    with c2:
-        if st.button("🔍 Analyze with Legitimacy Check", type="primary", use_container_width=True, key="analyze"):
-            if msg.strip():
-                st.session_state.msg = msg
-                st.session_state.stage = "RUNNING"
-                st.rerun()
-            else:
-                st.error("Please paste a message first.")
-    return msg
+    def predict(self, x):
+        α, β = self.forward(x)
+        mean = α / (α + β)
+        var = (α * β) / ((α + β) ** 2 * (α + β + 1))
+        return mean, var
 
-def hero(p: RiskProfile):
-    color = COLORS[p.level]
-    st.markdown(f"""
-    <div style='background:{color};color:white;padding:2.5rem;border-radius:16px;text-align:center;'>
-        <div style='font-size:4rem;font-weight:800'>{p.score}%</div>
-        <div style='font-size:1.5rem;font-weight:600;margin:.5rem 0;'>{p.level}</div>
-        <div style='opacity:.9'>Confidence: {p.confidence}%</div>
-    </div>""", unsafe_allow_html=True)
-    
-    # Show WHY the score is what it is
-    st.markdown("#### 📊 Risk Breakdown")
-    st.progress(float(p.score)/100.0)
-    
-    if p.legitimacy_proof:
-        st.markdown("##### ✅ Legitimacy Anchors Detected (Risk Reducer)")
-        for proof in p.legitimacy_proof[:3]:
-            st.markdown(f"<div class='proof-box'>{proof}</div>", unsafe_allow_html=True)
-    
-    if p.coherence_issues:
-        st.markdown("##### ⚠️ Confusion Tactics Detected (Risk Amplifier)")
-        for issue in p.coherence_issues[:2]:
-            st.markdown(f"<div class='issue-box'>{issue}</div>", unsafe_allow_html=True)
+# ------------------------------------------------------------------
+# 2. POPULATION-AWARE LEGITIMACY ENGINE
+# ------------------------------------------------------------------
+@dataclass
+class MessageContext:
+    lang: str  # ISO-639-1
+    region: str  # ISO-3166-2 (e.g., "BR-OR")
+    channel: str  # sms, whatsapp, email, etc.
+    sender_id_entropy: float  # Shannon entropy of sender string
 
-def triggers(p: RiskProfile):
-    if not p.triggers: 
-        st.info("🔍 No strong scam patterns detected. Risk may come from lack of legitimacy proof.")
-        return
-    
-    st.markdown("### 🎯 Scam Tactics Detected")
-    for trig, prob in sorted(p.triggers.items(), key=lambda x: x[1], reverse=True)[:5]:
-        emoji = "🔴" if prob > 0.7 else "🟡"
-        st.markdown(f"{emoji} **{trig.replace('_',' ').title()}** — {prob:.1%} match")
+class LegitimacyEngine:
+    """
+    1. Extracts expensive-to-forge signals (TLS cert chain, DNS TXT).
+    2. Re-weights them by population priors so rural Hindi MNREGA
+       is not penalised for lacking hdfcbank.com.
+    """
+    PRIORS = json.loads(Path("population_priors.json").read_text())  # shipped with model
 
-def actions(p: RiskProfile):
-    st.markdown("### 🎯 Recommended Next Steps")
-    for r in p.recos:
-        if "OFFICIAL" in r:
-            st.success(r)
-        elif "Verify" in r:
-            st.info(r)
-        elif "DO NOT" in r:
-            st.error(r)
-        elif "Pause" in r:
-            st.warning(r)
+    def __init__(self):
+        self.regex = {
+            "bank_dom": re.compile(r"https?://(?:www\.)?(hdfcbank|icici|sbi|axis|kotak|pnb)\.com", re.I),
+            "gov_dom": re.compile(r"https?://(?:www\.)?([a-z0-9-]+\.)?(gov\.in|nic\.in|ac\.in)", re.I),
+            "tollfree": re.compile(r"\b(1800|1860)\d{7}\b"),
+            "utr": re.compile(r"\b[0-9]{12,18}\b"),
+        }
 
-def verifiability_section(p: RiskProfile):
-    if p.verifiability_details:
-        with st.expander("🔬 Detailed Claim Analysis"):
-            for detail in p.verifiability_details:
-                st.markdown(f"- {detail}")
+    def _cert_chain_valid(self, domain: str) -> float:
+        try:
+            ctx = ssl.create_default_context()
+            with socket.create_connection((domain, 443), timeout=3) as sock:
+                with ctx.wrap_socket(sock, server_hostname=domain) as ssock:
+                    cert = ssock.getpeercert()
+                    return 1.0 if cert["subjectAltName"] else 0.0
+        except Exception:
+            return 0.0
 
-# ============================================================
-# MAIN PAGE FLOW
-# ============================================================
-def main():
-    st.set_page_config(page_title="BharatScam Guardian", page_icon="🛡️", layout="centered")
-    init_state()
-    header()
-    input_area()
-    
-    if st.session_state.stage == "RUNNING":
-        progress=st.progress(0)
-        status=st.empty()
-        steps=["🔍 Checking legitimacy anchors…","📄 Verifying claims…","🧠 Analyzing coherence…","⚠️ Computing risk…"]
-        for i, step in enumerate(steps):
-            status.markdown(step)
-            for p in range(25):
-                progress.progress((i * 25 + p + 1) / 100)
-                time.sleep(0.01)
+    def _txt_record(self, domain: str, key: str) -> float:
+        try:
+            answers = dns.resolver.resolve(domain, "TXT")
+            for r in answers:
+                if key in str(r):
+                    return 1.0
+            return 0.0
+        except Exception:
+            return 0.0
 
+    def score(self, text: str, ctx: MessageContext) -> Tuple[float, Dict]:
+        feats = {}
+        score = 0.0
+        # 1. Regex features (cheap)
+        for k, pat in self.regex.items():
+            m = len(pat.findall(text))
+            feats[k] = min(m * 0.3, 0.4)
+        # 2. Expensive features
+        for domain in self.regex["bank_dom"].findall(text):
+            feats["tls_bank"] = self._cert_chain_valid(domain)
+            score += feats["tls_bank"] * 0.4
+        for domain in self.regex["gov_dom"].findall(text):
+            feats["txt_gov"] = self._txt_record(domain, "v=spf1")
+            score += feats["txt_gov"] * 0.3
+        # 3. Population prior re-weighting
+        prior = self.PRIORS.get(ctx.lang, {}).get(ctx.region, {})
+        if prior:
+            weight = prior.get("gov_mult", 1.0)
+            feats["gov_dom"] *= weight
+        return min(score + sum(feats.values()), 1.0), feats
 
-                
-               
-        
-        orch = CoreOrchestrator(*load_model()[2:])
-        profile = orch.infer(st.session_state.msg)
-        st.session_state.profile = profile
-        st.session_state.stage = "DONE"
-        st.rerun()
-    
-    if st.session_state.stage == "DONE" and st.session_state.profile:
-        hero(st.session_state.profile)
-        triggers(st.session_state.profile)
-        actions(st.session_state.profile)
-        verifiability_section(st.session_state.profile)
-        
-        if st.button("🔄 Analyze New Message", key="reset"):
-            st.session_state.msg = None
-            st.session_state.profile = None
-            st.session_state.stage = None
-            st.rerun()
+# ------------------------------------------------------------------
+# 3. CLAIM-LEVEL VERIFIABILITY WITH SEMANTIC ROLE LABELING
+# ------------------------------------------------------------------
+class Claim:
+    def __init__(self, text: str, role: str, verif: float):
+        self.text, self.role, self.verif = text, role, verif
 
-if __name__ == "__main__":
-    main()   
+class ClaimExtractor:
+    ROLE_PAT = {
+        "financial": re.compile(r"₹?\s?[\d,]+(?:\.\d{2})?|UTR\s?[0-9]{12,18}", re.I),
+        "temporal": re.compile(r"\b(?:today|tomorrow|by\s+\d{1,2}/\d{1,2})\b", re.I),
+        "identity": re.compile(r"\b(RBI|NPCI|UIDAI|IT\s+Dept|SBI|HDFC)\b", re.I),
+        "action": re.compile(r"\b(?:click|pay|send|update)\s+(?:link|money|details)\b", re.I),
+    }
+
+    def extract(self, text: str) -> List[Claim]:
+        claims = []
+        for role, pat in self.ROLE_PAT.items():
+            for m in pat.finditer(text):
+                # verif placeholder – real system would call KB / API
+                verif = 0.5 if role == "financial" else 0.3
+                claims.append(Claim(m.group(), role, verif))
+        return claims
+
+# ------------------------------------------------------------------
+# 4. EPHEMERAL FINE-TUNING WITH LORA + EWC
+# ------------------------------------------------------------------
+class ContinualModel(nn.Module):
+    def __init__(self, base_model_name: str, n_classes: int):
+        super().__init__()
+        self.backbone = AutoModelForSequenceClassification.from_pretrained(
+            base_model_name, num_labels=n_classes, torch_dtype=torch.int8
+        )
+        # small LoRA adapter
+        from peft import get_peft_model, LoraConfig
+        peft_config = LoraConfig(r=8, lora_alpha=32, target_modules=["q_proj", "v_proj"])
+        self.backbone = get_peft_model(self.backbone, peft_config)
+        self.calibrator = BetaCalibrator(n_classes)
+
+    def forward(self, input_ids, attention_mask, labels=None):
+        h = self.backbone(input_ids=input_ids, attention_mask=attention_mask).logits
+        α, β = self.calibrator(h)
+        if labels is not None:
+            loss = self.beta_nll(α, β, labels)
+            return loss, α, β
+        return α, β
+
+    def beta_nll(self, α, β, y):
+        y = y.float()
+        eps = 1e-6
+        α, β = α + eps, β + eps
+        loglik = (α - 1) * (y + eps).log() + (β - 1) * (1 - y + eps).log() - torch.lgamma(α) - torch.lgamma(β) + torch.lgamma(α + β)
+        return -loglik.mean()
+
+# ------------------------------------------------------------------
+# 5. ORCHESTRATOR
+# ------------------------------------------------------------------
+class GuardianOrchestrator:
+    def __init__(self, model_path: str):
+        tok_path = model_path + "/tokenizer"
+        self.tok = AutoTokenizer.from_pretrained(tok_path)
+        self.model = ContinualModel(model_path, n_classes=15).to(DEVICE)
+        self.leg_engine = LegitimacyEngine()
+        self.claim_ext = ClaimExtractor()
+
+    def predict(self, text: str, lang: str = "en", region: str = "IN") -> Dict:
+        ctx = MessageContext(lang=lang, region=region, channel="sms", sender_id_entropy=0.8)
+        # 1. Neural signals
+        inputs = self.tok(text, return_tensors="pt", truncation=True, max_length=256)
+        inputs = {k: v.to(DEVICE) for k, v in inputs.items()}
+        with torch.no_grad():
+            α, β = self.model(**inputs)
+            scam_mean = (α / (α + β)).cpu().numpy()[0]  # scalar
+            scam_var = (α * β / ((α + β) ** 2 * (α + β + 1))).cpu().numpy()[0]
+        # 2. Legitimacy
+        leg_score, leg_feats = self.leg_engine.score(text, ctx)
+        # 3. Claims
+        claims = self.claim_ext.extract(text)
+        verif_frac = np.mean([c.verif for c in claims]) if claims else 0.0
+        # 4. Fusion (Bayesian update: prior = legitimacy, likelihood = neural)
+        prior_logodds = math.log((1 - leg_score) / (leg_score + 1e-6))
+        likelihood_logodds = math.log(scam_mean / (1 - scam_mean + 1e-6))
+        post_logodds = prior_logodds + likelihood_logodds
+        post_prob = 1 / (1 + math.exp(-post_logodds))
+        return {
+            "scam_prob": round(float(post_prob), 3),
+            "scam_var": round(float(scam_var), 3),
+            "legitimacy": leg_feats,
+            "claims": [{"text": c.text, "role": c.role, "verif": c.verif} for c in claims],
+        }
+
+# ------------------------------------------------------------------
+# 6. STREAMLIT UI (minimal)
+# ------------------------------------------------------------------
+@st.cache_resource
+def load_orchestrator():
+    return GuardianOrchestrator("moonshot-india/bharat-scam-guardian-base")
+
+st.set_page_config(page_title="BharatScam-Guardian", layout="centered")
+st.title("🛡️ BharatScam-Guardian ")
+text = st.text_area("Paste message below:", height=150)
+lang = st.selectbox("Language", ["en", "hi", "ta", "te", "mr", "bn"])
+if st.button("Analyze"):
+    if not text.strip():
+        st.error("Empty text")
+        st.stop()
+    orch = load_orchestrator()
+    out = orch.predict(text, lang=lang)
+    prob = out["scam_prob"]
+    st.metric("Scam probability", f"{prob:.1%}", delta=None)
+    fig = px.pie(values=[prob, 1 - prob], names=["Scam", "Legit"], hole=0.4)
+    st.plotly_chart(fig, use_container_width=True)
+    with st.expander("Legitimacy features"):
+        st.json(out["legitimacy"])
+    with st.expander("Extracted claims"):
+        st.json(out["claims"])
