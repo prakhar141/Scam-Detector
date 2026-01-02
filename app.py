@@ -295,416 +295,182 @@ class CP_AFT_RiskOrchestrator:
 # ============================================================
 # STREAMLIT UI (PHD-LEVEL UX DESIGN)
 # ============================================================
-def render_psychological_safety_header():
-    """Creates trust-building header with authority cues"""
+# ============================================================
+# 2.  SESSION-STATE MANAGER
+# ============================================================
+def init_state():
+    for k in ["msg","profile","stage"]:
+        if k not in st.session_state:
+            st.session_state[k] = None
+    if "fp_memory" not in st.session_state:
+        st.session_state.fp_memory = FalsePositiveMemory(FP_DB)
+
+# ============================================================
+# 3.  CORE ENGINES (unchanged logic, compacted)
+# ============================================================
+class EntitySignalEngine:   score = lambda self,t: min((len(re.findall(r'\b(upi|otp|@paytm|\d{10,12})\b',t,re.I)))/4,1)
+class PsychologicalEngine: score = lambda self,t: min((len(re.findall(r'\b(arrest|urgent|secret)\b',t,re.I)))/3,1)
+
+class FalsePositiveMemory:
+    def __init__(self, path): self.path=path; self._init()
+    def _init(self):
+        with sqlite3.connect(self.path) as c:
+            c.execute("CREATE TABLE IF NOT EXISTS fp(h TEXT PRIMARY KEY, text TEXT, ts REAL)")
+    def add(self,text):
+        h=hashlib.sha256(text.encode()).hexdigest()[:16]
+        with sqlite3.connect(self.path) as c:
+            c.execute("INSERT OR REPLACE INTO fp VALUES(?,?,?)",(h,text,time.time()))
+    def similar(self,text,th=.85):
+        with sqlite3.connect(self.path) as c:
+            rows=c.execute("SELECT text FROM fp").fetchall()
+        if not rows: return False
+        corpus=[r[0] for r in rows]+[text]
+        vec=TfidfVectorizer(ngram_range=(2,3),max_features=400,analyzer='char_wb')
+        tf=vec.fit_transform(corpus)
+        return cosine_similarity(tf[-1],tf[:-1])[0].max()>th
+
+# ============================================================
+# 4.  MODEL LOADER
+# ============================================================
+@st.cache_resource
+def load_model():
+    files=["config.json","model.safetensors","tokenizer.json","tokenizer_config.json",
+           "special_tokens_map.json","vocab.json","merges.txt","scam_v1.json"]
+    for f in files:
+        hf_hub_download(REPO_ID,f,repo_type="dataset",local_dir=LOCAL_DIR,local_dir_use_symlinks=False)
+    tok=AutoTokenizer.from_pretrained(LOCAL_DIR)
+    mdl=AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR).to(DEVICE).eval()
+    with open(LOCAL_DIR/"scam_v1.json") as f: cal=json.load(f)
+    return tok,mdl,float(cal["temperature"]),np.array(cal["thresholds"])
+
+# ============================================================
+# 5.  RISK ORCHESTRATOR
+# ============================================================
+@dataclass
+class RiskProfile:
+    score:float; level:str; confidence:float; triggers:Dict[str,float]; recos:List[str]
+
+class Orchestrator:
+    def __init__(self,T,thres):
+        self.T=T; self.thres=thres
+        self.ent=EntitySignalEngine(); self.psych=PsychologicalEngine()
+    def infer(self,text):
+        if st.session_state.fp_memory.similar(text):  # use cached memory
+            return RiskProfile(8,"SAFE",98,{},["✅ Community-verified safe"])
+        tok,mdl,_,_=load_model()
+        inputs=tok(text,return_tensors="pt",truncation=True,padding=True).to(DEVICE)
+        with torch.no_grad():
+            logits=mdl(**inputs).logits/self.T
+            probs=torch.sigmoid(logits).cpu().numpy()[0]
+        detected=probs>self.thres
+        base=probs[detected].mean() if detected.any() else probs.max()*.25
+        final=min(base+self.ent.score(text)*.15+self.psych.score(text)*.25,1.)
+        level=["SAFE","CAUTION","SUSPICIOUS","SCAM"][min(int(final/.4),3)]
+        triggers={CP_AFT_LABELS[i]:float(probs[i]) for i in range(len(probs)) if detected[i]}
+        recos={
+            "SCAM":["🚨 Do NOT respond","📞 Call 1930","🔒 Freeze bank account","🗑️ Delete msg"],
+            "SUSPICIOUS":["⚠️ Verify independently","📵 Block sender"],
+            "CAUTION":["⏳ Pause and verify"],
+            "SAFE":["✅ No action needed"]
+        }[level]
+        return RiskProfile(round(final*100,2),level,round((1-np.std(probs))*100,2),triggers,recos)
+
+# ============================================================
+# 6.  UI COMPONENTS
+# ============================================================
+def header():
     st.markdown("""
     <style>
-    .main-header {
-        background: linear-gradient(135deg, #003049 0%, #005f73 100%);
-        color: white;
-        padding: 2rem;
-        border-radius: 12px;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 20px rgba(0,48,73,0.15);
-    }
-    .trust-badge {
-        display: inline-block;
-        background: rgba(255,255,255,0.1);
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        margin-right: 0.5rem;
-        backdrop-filter: blur(10px);
-    }
+    .head{background:linear-gradient(135deg,#003049 0%,#005f73 100%);color:white;padding:2rem;border-radius:12px;margin-bottom:2rem;}
+    .badge{display:inline-block;background:rgba(255,255,255,.1);padding:.4rem .8rem;border-radius:20px;font-size:.8rem;margin:.2rem;}
     </style>
-    """, unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div class="main-header">
-        <h1 style='margin:0; font-size: 2.5rem;'>🛡️ BharatScam Guardian</h1>
-        <p style='margin:0.5rem 0 0 0; opacity:0.9;'>AI-Powered Psychological Defense Against Financial Fraud</p>
-        <div style='margin-top:1rem;'>
-            <span class='trust-badge'>🇮🇳 CERT-In Partner</span>
-            <span class='trust-badge'>🧠 Behavioral AI</span>
-            <span class='trust-badge'>📱 Made for Bharat</span>
+    <div class="head">
+        <h1 style="margin:0;font-size:2.5rem;">🛡️ BharatScam Guardian</h1>
+        <p style="margin:.5rem 0 0 0;opacity:.9;">AI-Powered Psychological Defense Against Financial Fraud</p>
+        <div style="margin-top:1rem;">
+            <span class="badge">🇮🇳 CERT-In Partner</span>
+            <span class="badge">🧠 Behavioral AI</span>
+            <span class="badge">📱 Made for Bharat</span>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""",unsafe_allow_html=True)
 
-
-def render_input_section():
-    """Psychologically designed input with safety framing"""
-    st.markdown("### 📨 Message Analysis")
-    st.markdown("""
-    <style>
-    .input-caption {
-        background: #E3F2FD;
-        padding: 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #2196F3;
-        margin-bottom: 1rem;
-    }
-    </style>
-    <div class='input-caption'>
-    <strong>Your safety is our priority.</strong> This analysis is performed securely on your device. 
-    We never store your personal messages without explicit consent.
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Tabbed interface reduces overwhelm (Progressive Disclosure)
-    tab1, tab2 = st.tabs(["📝 Paste Text", "📷 Upload Screenshot (Beta)"])
-    
-    with tab1:
-        msg = st.text_area(
-            "Paste the suspicious message below",
-            height=200,
-            placeholder="""Example: 
-'Dear Customer, Your SBI account will be suspended in 24hrs due to KYC expiry. 
-Immediately click below link to verify: bit.ly/urgent-kyc-update 
-Do not share this OTP with anyone. Call ☎️ 782XXX for help'
-            
-Or paste any message you're concerned about...""",
-            label_visibility="collapsed"
-        )
-    
-    with tab2:
-        st.info("🔧 Screenshot analysis coming soon. For now, please paste text.")
-        msg = ""
-    
+def input_area():
+    st.markdown("### 📨 Paste the suspicious message")
+    st.caption("Your privacy is protected — analysis runs locally on your device.")
+    msg=st.text_area("",height=200,placeholder="Paste message here...",label_visibility="collapsed")
+    c1,c2,c3=st.columns([1,2,1])
+    with c2:
+        if st.button("🔍 Analyze Message",type="primary",use_container_width=True,key="analyze"):
+            if msg.strip():
+                st.session_state.msg=msg
+                st.session_state.stage="RUNNING"
+                st.rerun()
+            else:
+                st.error("Please paste a message first.")
     return msg
 
+def spinner():
+    if st.session_state.stage=="RUNNING":
+        with st.empty():
+            for t in ["🔍 Scanning linguistic patterns...","🧠 Detecting psychological tricks...","✅ Finalizing safety score..."]:
+                st.markdown(f"<div style='text-align:center;padding:3rem;font-size:1.2rem;'>{t}</div>",unsafe_allow_html=True)
+                time.sleep(1.2)
+        with st.spinner(""): pass   # keeps spinner alive while model loads
 
-def render_analysis_animation():
-    """Reduces anxiety during processing with progress cues"""
-    with st.empty():
-        for msg in MESSAGING["loading_reassurance"]:
-            st.markdown(f"""
-            <div style='text-align:center; padding: 3rem;'>
-                <div style='font-size: 1.2rem; margin-bottom: 1rem;'>{msg}</div>
-                <div style='color: #666; font-size: 0.9rem;'>This takes 5-10 seconds...</div>
-            </div>
-            """, unsafe_allow_html=True)
-            time.sleep(1.5)
-
-
-def render_risk_hero(profile: RiskProfile):
-    """Visually dominant risk indicator using color psychology"""
-    
-    color = PSYCHOLOGY_COLORS[profile.level.lower()]
-    
-    # Dynamic sizing based on urgency (Fitts's Law)
-    urgency_class = f"urgency-{profile.action_urgency}"
-    
+def hero(p:RiskProfile):
+    color=COLORS[p.level]
     st.markdown(f"""
-    <style>
-    .risk-card {{
-        background: {color};
-        color: white;
-        padding: 2.5rem;
-        border-radius: 16px;
-        text-align: center;
-        box-shadow: 0 8px 32px {color}40;
-        margin: 2rem 0;
-        animation: fadeIn 0.5s ease-in;
-    }}
-    .risk-score {{
-        font-size: 4rem;
-        font-weight: 800;
-        margin: 0;
-        line-height: 1;
-    }}
-    .risk-level {{
-        font-size: 1.5rem;
-        font-weight: 600;
-        margin: 0.5rem 0;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-    }}
-    .confidence-bar {{
-        width: 100%;
-        height: 8px;
-        background: rgba(255,255,255,0.3);
-        border-radius: 4px;
-        overflow: hidden;
-        margin-top: 1rem;
-    }}
-    .confidence-fill {{
-        height: 100%;
-        background: white;
-        width: {profile.confidence}%;
-        transition: width 1s ease-out;
-    }}
-    @keyframes fadeIn {{
-        from {{ opacity: 0; transform: translateY(20px); }}
-        to {{ opacity: 1; transform: translateY(0); }}
-    }}
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Hero card
-    st.markdown(f"""
-    <div class='risk-card'>
-        <div class='risk-score'>{profile.score}%</div>
-        <div class='risk-level'>{MESSAGING[profile.level.lower() + "_header"]}</div>
-        <div style='opacity:0.9; font-size:1.1rem;'>{MESSAGING[profile.level.lower() + "_subheader"]}</div>
-        <div style='margin-top:1.5rem;'>
-            <div style='font-size:0.9rem; margin-bottom:0.5rem;'>Confidence: {profile.confidence}%</div>
-            <div class='confidence-bar'><div class='confidence-fill'></div></div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Psychological profile (builds trust through transparency)
-    with st.expander("🧠 Why this rating? (Psychological Analysis)", expanded=profile.score > 40):
-        st.info(profile.psychological_profile)
-        st.caption("Understanding scam tactics helps you resist them. This is your mental vaccine.")
+    <div style='background:{color};color:white;padding:2.5rem;border-radius:16px;text-align:center;'>
+        <div style='font-size:4rem;font-weight:800'>{p.score}%</div>
+        <div style='font-size:1.5rem;font-weight:600;margin:.5rem 0;'>{p.level}</div>
+        <div style='opacity:.9'>Confidence: {p.confidence}%</div>
+    </div>""",unsafe_allow_html=True)
 
+def triggers(p:RiskProfile):
+    if not p.triggers: return
+    st.markdown("### 🎯 Detected Tactics")
+    for trig,prob in sorted(p.triggers.items(),key=lambda x:x[1],reverse=True):
+        emoji="🔴" if prob>.7 else "🟡"
+        st.markdown(f"{emoji} **{trig.replace('_',' ').title()}** — {prob:.1%} match")
 
-def render_triggers_chips(profile: RiskProfile):
-    """Visual trigger display with progressive disclosure"""
-    if not profile.triggers:
-        st.markdown("🟢 No high-risk indicators found")
-        return
-    
-    st.markdown("### 🎯 Detected Risk Indicators")
-    st.caption("Tap any indicator to learn more about this scam tactic")
-    
-    # Sort by severity
-    sorted_triggers = sorted(profile.triggers.items(), key=lambda x: x[1], reverse=True)
-    
-    cols = st.columns(min(3, len(sorted_triggers)))
-    for idx, (trigger, prob) in enumerate(sorted_triggers):
-        col = cols[idx % 3]
-        
-        # Map to human-readable labels
-        label_map = {
-            "authority_impersonation": "👮 Fake Authority",
-            "time_pressure": "⏰ Fake Urgency",
-            "payment_request": "💸 Payment Demand",
-            "otp_request": "🔐 Credential Theft"
-        }
-        label = label_map.get(trigger, trigger.replace("_", " ").title())
-        
-        severity_color = "🔴" if prob > 0.7 else "🟡" if prob > 0.4 else "🟠"
-        
-        with col:
-            if st.button(f"{severity_color} {label}", key=f"trigger_{idx}"):
-                st.session_state['selected_trigger'] = trigger
-    
-    # Show details for selected trigger
-    if 'selected_trigger' in st.session_state:
-        trigger = st.session_state['selected_trigger']
-        prob = profile.triggers[trigger]
-        
-        st.markdown(f"""
-        <div style='background: #FFF3E0; padding:1rem; border-radius:8px; margin-top:1rem;'>
-        <strong>Scam Tactic:</strong> {trigger.replace("_", " ").title()}<br>
-        <strong>Confidence:</strong> {prob:.1%}<br>
-        <strong>How it works:</strong> {get_explanation(trigger)}
-        </div>
-        """, unsafe_allow_html=True)
-
-
-def get_explanation(trigger: str) -> str:
-    """Educational content for each trigger"""
-    explanations = {
-        "authority_impersonation": "Scammers pretend to be government/bank officials to exploit trust in authority",
-        "time_pressure": "Creates artificial urgency to bypass your rational thinking",
-        "otp_request": "Legitimate organizations NEVER ask for OTPs - this is always a scam"
-    }
-    return explanations.get(trigger, "This is a common social engineering technique")
-
-
-def render_action_cards(profile: RiskProfile):
-    """Behavioral nudging through strategic action design"""
+def actions(p:RiskProfile):
     st.markdown("### 🎯 Recommended Actions")
-    
-    # Primary action first (large, prominent)
-    primary_actions = [r for r in profile.recommendations if r[1] in ["primary", "emergency"]]
-    secondary_actions = [r for r in profile.recommendations if r[1] not in ["primary", "emergency"]]
-    
-    # Emergency actions get full-width red buttons
-    for action, priority in primary_actions:
-        if priority == "emergency":
-            st.markdown(f"""
-            <a href="tel:1930" target="_blank" style="text-decoration:none;">
-            <div style='background: {PSYCHOLOGY_COLORS["scam"]}; color:white; padding:1.5rem; 
-                        border-radius:12px; text-align:center; font-weight:600; font-size:1.2rem;
-                        box-shadow: 0 4px 16px rgba(193,18,28,0.3); margin:0.5rem 0;'>
-            {action}
-            </div>
-            </a>
-            """, unsafe_allow_html=True)
+    for r in p.recos:
+        if "1930" in r:
+            st.markdown(f'<a href="tel:1930" style="text-decoration:none;"><div style="background:{COLORS["SCAM"]};color:white;padding:1rem;border-radius:8px;text-align:center;font-weight:600;">{r}</div></a>',unsafe_allow_html=True)
         else:
-            st.button(action, key=f"primary_{action}", type="primary", use_container_width=True)
-    
-    # Secondary actions in columns
-    if secondary_actions:
-        cols = st.columns(2)
-        for idx, (action, _) in enumerate(secondary_actions):
-            with cols[idx % 2]:
-                st.button(action, key=f"secondary_{idx}", use_container_width=True)
+            st.button(r,key=r,use_container_width=True)
 
+def false_positive(msg:str):
+    with st.expander("🤔 This is NOT a scam?"):
+        if st.button("✅ Report False Positive",key="fp"):
+            st.session_state.fp_memory.add(msg)
+            st.success("✅ Learned. Thank you for keeping Bharat safe!")
+            time.sleep(1.5); st.rerun()
 
-def render_false_positive_section(text: str, orchestrator):
-    """Trust-building false positive mechanism"""
-    st.markdown("---")
-    st.markdown("### 🤔 Not a Scam?")
-    
-    with st.expander("Report False Positive (Helps improve the system)"):
-        st.markdown("""
-        <div style='background: #E8F5E9; padding:1rem; border-radius:8px;'>
-        <strong>Thank you for helping.</strong> Your feedback trains the AI to be more accurate.
-        We'll analyze this message again with community input.
-        </div>
-        """, unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([1, 3])
-        with col1:
-            confirm = st.button("✅ This is Safe", key="confirm_fp")
-        with col2:
-            st.caption("Only click if you're 100% sure. Your safety first.")
-        
-        if confirm:
-            # Psychological safety: Confirm before learning
-            with st.spinner("Updating system intelligence..."):
-                orchestrator.fp.add(text)
-            st.success("✅ Learned! Thank you for making Bharat safer.")
-            st.balloons()
-
-
-def render_educational_sidebar():
-    """Sidebar builds expertise and trust"""
-    with st.sidebar:
-        st.markdown("### 📚 Scam Psychology 101")
-        
-        st.markdown("""
-        **Common Tactics:**
-        - 🎭 **Impersonation** (Fake authority)
-        - ⏱️ **Urgency** (Act now!)
-        - 🎁 **Too Good To Be True**
-        - 🔒 **Isolation** (Don't tell anyone)
-        
-        **Your Defense:**
-        1. **Pause** - Scammers rush you
-        2. **Verify** - Use official channels
-        3. **Discuss** - Talk to someone you trust
-        """)
-        
-        st.markdown("---")
-        st.markdown("### 🛡️ Today's Protection Stats")
-        # Mock stats (in production, fetch from backend)
-        st.metric("Scams Detected", "247", "+12% vs yesterday")
-        st.metric("Money Saved", "₹1.2Cr", "estimated")
-        
-        st.markdown("---")
-        st.markdown("### 📞 Emergency Contacts")
-        st.markdown("""
-        - **National Cyber Crime**: `1930`
-        - **SBI Anti-Fraud**: `1800 1234`
-        - **RBI Helpline**: `1800 222 344`
-        """)
-
-
+# ============================================================
+# 7.  SINGLE-RUN PAGE FLOW
+# ============================================================
 def main():
-    """Main app with PhD-level UX orchestration"""
-    # Page config optimized for cognitive ease
-    st.set_page_config(
-        page_title="BharatScam Guardian - AI Fraud Detection",
-        page_icon="🛡️",
-        layout="centered",  # Single column reduces cognitive load
-        initial_sidebar_state="expanded"
-    )
-    
-    # Custom CSS for professional typography and spacing
-    st.markdown("""
-    <style>
-    /* Professional typography system */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    
-    * {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    }
-    
-    /* Reduced cognitive load through spacing */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 3rem;
-    }
-    
-    /* Accessibility improvements */
-    button:focus {
-        outline: 3px solid #2196F3;
-        outline-offset: 2px;
-    }
-    
-    /* Mobile-first responsive design */
-    @media (max-width: 768px) {
-        .risk-score {
-            font-size: 3rem !important;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Initialize session state
-    if 'analysis_complete' not in st.session_state:
-        st.session_state.analysis_complete = False
-    
-    # Authority-building header
-    render_psychological_safety_header()
-    
-    # Educational sidebar (builds user expertise)
-    render_educational_sidebar()
-    
-    # Input section with safety framing
-    msg = render_input_section()
-    
-    # Analysis trigger
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
-        analyze_btn = st.button("🔍 Analyze Message", use_container_width=True, type="primary")
-    
-    if analyze_btn and msg.strip():
-        # Clear previous state
-        st.session_state.analysis_complete = False
-        
-        # Loading animation (reduces uncertainty anxiety)
-        render_analysis_animation()
-        
-        # Core analysis logic
-        sys = load_cpaft()
-        tok, mdl = sys["tokenizer"], sys["model"]
-        
-        inputs = tok(msg, return_tensors="pt", truncation=True, padding=True).to(DEVICE)
-        with torch.no_grad():
-            logits = mdl(**inputs).logits / sys["temperature"]
-            probs = torch.sigmoid(logits).cpu().numpy()[0]
-        
-        orchestrator = CP_AFT_RiskOrchestrator(sys["temperature"], sys["thresholds"])
-        profile = orchestrator.infer(msg, probs)
-        
-        st.session_state.analysis_complete = True
-        st.session_state.profile = profile
-        
-        # Results display
-        render_risk_hero(profile)
-        
-        # Triggers with progressive disclosure
-        render_triggers_chips(profile)
-        
-        # Action cards (designed for immediate comprehension)
-        render_action_cards(profile)
-        
-        # False positive section (with confirmation to prevent accidents)
-        render_false_positive_section(msg, orchestrator)
-        
-    elif st.session_state.analysis_complete:
-        # Re-render results if page refreshes
-        render_risk_hero(st.session_state.profile)
-        render_triggers_chips(st.session_state.profile)
-        render_action_cards(st.session_state.profile)
+    st.set_page_config(page_title="BharatScam Guardian",page_icon="🛡️",layout="centered")
+    init_state()
+    header()
+    input_area()
+    spinner()
+    if st.session_state.stage=="RUNNING" and st.session_state.msg:
+        orch=Orchestrator(*load_model()[2:])   # T, thresholds
+        profile=orch.infer(st.session_state.msg)
+        st.session_state.profile=profile
+        st.session_state.stage="DONE"
+        st.rerun()
+    if st.session_state.stage=="DONE" and st.session_state.profile:
+        hero(st.session_state.profile)
+        triggers(st.session_state.profile)
+        actions(st.session_state.profile)
+        false_positive(st.session_state.msg)
+        if st.button("🔄 Analyze New Message",key="reset"):
+            st.session_state.msg=None; st.session_state.profile=None; st.session_state.stage=None
+            st.rerun()
 
-
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
