@@ -30,31 +30,41 @@ TRIGGERS   = [
     "pseudo_set_progress","moral_framing","self_consistency_nudge",
     "curiosity_gap","illusion_of_transparency","weak_social_proof"
 ]
-
 # ------------------------------------------------------------------
-# 2. LOAD YOUR CALIBRATED 24-D MODEL
+# 2. LOCAL-ONLY LOADER (NO HF HUB)
 # ------------------------------------------------------------------
 @st.cache_resource(show_spinner="🛡️ Loading 24-trigger CP-AFT model…")
 def load_cpaft_pipeline():
-    from transformers import AutoModelForSequenceClassification
-    model_path = "./scam_detector_final"
-    cal_path   = "./calibration/scam_v1.json"
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-    tok = AutoTokenizer.from_pretrained(model_path)
+    model_dir = Path("scam_detector_final")          # local folder
+    cal_file  = Path("calibration/scam_v1.json")     # calibration json
+
+    # ---- tokenizer ----
+    tok = AutoTokenizer.from_pretrained(
+        str(model_dir.resolve()),      # absolute path avoids any hub lookup
+        local_files_only=True          # <- guarantees no HF traffic
+    )
+
+    # ---- model ----
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_path, num_labels=N_TRIG, ignore_mismatched_sizes=True
+        str(model_dir.resolve()),
+        num_labels=N_TRIG,
+        ignore_mismatched_sizes=True,
+        torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
+        local_files_only=True          # <- same here
     ).eval().to(DEVICE)
 
-    with open(cal_path) as f:
+    # ---- calibration ----
+    with open(cal_file) as f:
         cal = json.load(f)
 
     return {
         "tokenizer": tok,
         "model": model,
         "temperature": float(cal["temperature"]),
-        "thresholds": np.array(cal["thresholds"])  # 24-D
+        "thresholds": np.array(cal["thresholds"])
     }
-
 # ------------------------------------------------------------------
 # 3. PSYCHOLOGICAL + PATTERN MODULES (unchanged API)
 # ------------------------------------------------------------------
