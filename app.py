@@ -33,30 +33,46 @@ TRIGGERS   = [
 # ------------------------------------------------------------------
 # 2. LOCAL-ONLY LOADER (NO HF HUB)
 # ------------------------------------------------------------------
-@st.cache_resource(show_spinner="🛡️ Loading 24-trigger CP-AFT model…")
+# ------------------------------------------------------------------
+# 2. HF-DATASET → FLAT LOCAL DIR  (NO SUB-FOLDERS)
+# ------------------------------------------------------------------
+@st.cache_resource(show_spinner="🛡️ Fetching 24-trigger CP-AFT artefacts…")
 def load_cpaft_pipeline():
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import AutoTokenizer, AutoConfig, AutoModelForSequenceClassification
+    from huggingface_hub import hf_hub_download
+    import json
+    import shutil
 
-    model_dir = Path("scam_detector_final")          # local folder
-    cal_file  = Path("calibration/scam_v1.json")     # calibration json
+    HF_DATASET = "prakhar146/scam"   # ← your HF dataset repo
+    LOCAL_DIR  = Path("hf_flat").resolve()   # flat folder
+    LOCAL_DIR.mkdir(exist_ok=True)
 
-    # ---- tokenizer ----
-    tok = AutoTokenizer.from_pretrained(
-        str(model_dir.resolve()),      # absolute path avoids any hub lookup
-        local_files_only=True          # <- guarantees no HF traffic
-    )
+    # list of exact files you uploaded to the dataset repo
+    FILES = ["config.json", "model.safetensors", "tokenizer.json",
+             "tokenizer_config.json", "special_tokens_map.json",
+             "vocab.json", "merges.txt", "scam_v1.json"]
 
-    # ---- model ----
+    # download each file straight into LOCAL_DIR (no sub-dirs)
+    for fname in FILES:
+        hf_hub_download(
+            repo_id=HF_DATASET,
+            filename=fname,
+            repo_type="dataset",
+            local_dir=str(LOCAL_DIR),
+            local_dir_use_symlinks=False
+        )
+
+    # ----- load from flat folder -----
+    tok = AutoTokenizer.from_pretrained(str(LOCAL_DIR), local_files_only=True)
+    config = AutoConfig.from_pretrained(LOCAL_DIR / "config.json", local_files_only=True)
+    config.num_labels = N_TRIG
+    state_dict = load_safetensors(LOCAL_DIR / "model.safetensors")
     model = AutoModelForSequenceClassification.from_pretrained(
-        str(model_dir.resolve()),
-        num_labels=N_TRIG,
-        ignore_mismatched_sizes=True,
-        torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32,
-        local_files_only=True          # <- same here
+        None, config=config, state_dict=state_dict,
+        torch_dtype=torch.float16 if DEVICE == "cuda" else torch.float32
     ).eval().to(DEVICE)
 
-    # ---- calibration ----
-    with open(cal_file) as f:
+    with open(LOCAL_DIR / "scam_v1.json") as f:
         cal = json.load(f)
 
     return {
@@ -65,6 +81,13 @@ def load_cpaft_pipeline():
         "temperature": float(cal["temperature"]),
         "thresholds": np.array(cal["thresholds"])
     }
+
+# ------------------------------------------------------------------
+# tiny helper
+# ------------------------------------------------------------------
+def load_safetensors(path):
+    import safetensors.torch
+    return safetensors.torch.load_file(path)
 # ------------------------------------------------------------------
 # 3. PSYCHOLOGICAL + PATTERN MODULES (unchanged API)
 # ------------------------------------------------------------------
