@@ -1,5 +1,8 @@
 # Streamlit for UI
 streamlit>=1.28.0
+streamlit-lottie
+requests
+
 
 # Deep learning & NLP
 torch>=2.0.0
