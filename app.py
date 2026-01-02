@@ -14,13 +14,12 @@ import streamlit as st
 import torch
 import torch.nn.functional as F
 import numpy as np
-import json, re, time, hashlib, sqlite3
+import json, re, time, hashlib, sqlite3, subprocess, sys
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Set
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from huggingface_hub import hf_hub_download
-import spacy
 
 # ============================================================
 # BEHAVIORAL PSYCHOLOGY & VERIFIABILITY CONFIGURATION
@@ -57,13 +56,6 @@ REPO_ID = "prakhar146/scam"
 LOCAL_DIR = Path("./hf_cpaft_core")
 LOCAL_DIR.mkdir(exist_ok=True)
 DB_PATH = Path("./trust_anchors.db")
-
-# Load spaCy for claim extraction
-try:
-    nlp = spacy.load("en_core_web_sm")
-except:
-    import subprocess; subprocess.run(["python", "-m", "spacy", "download", "en_core_web_sm"])
-    nlp = spacy.load("en_core_web_sm")
 
 CP_AFT_LABELS = [
     "account_threat","time_pressure","payment_request","credential_phish",
@@ -109,21 +101,28 @@ class TrustAnchorEngine:
 class VerifiableClaimsEngine:
     """Deconstructs message into claims and scores their verifiability"""
     def extract_claims(self, text: str) -> List[Claim]:
-        doc = nlp(text)
+        """Simple regex-based claim extraction (no spaCy required)"""
         claims = []
         
-        # Financial claims (most critical)
-        for ent in doc.ents:
-            if ent.label_ in ["MONEY", "CARDINAL", "DATE", "TIME"]:
-                claim_type = "financial" if ent.label_ == "MONEY" else "temporal" if ent.label_ in ["DATE", "TIME"] else "identity"
-                claims.append(Claim(ent.text, claim_type, 0.0))  # Default unverifiable
+        # Financial claims (amounts, numbers)
+        financial_matches = re.findall(r'\b(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d{2})?\b|\b\d{6,}\b', text, re.I)
+        for match in financial_matches:
+            claims.append(Claim(match, "financial", 0.0))
         
-        # Action claims (verbs suggesting user action)
-        for token in doc:
-            if token.pos_ == "VERB" and token.dep_ in ["ROOT", "xcomp"]:
-                action_claim = f"{token.text} {token.head.text if token.dep_ != 'ROOT' else ''}".strip()
-                if len(action_claim) > 3:
-                    claims.append(Claim(action_claim, "action", 0.0))
+        # Temporal claims
+        temporal_matches = re.findall(r'\b(?:today|tomorrow|yesterday|within\s+\d+\s+(?:hour|day|week|month)s?|by\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b', text, re.I)
+        for match in temporal_matches:
+            claims.append(Claim(match, "temporal", 0.0))
+        
+        # Identity claims (organizations)
+        identity_matches = re.findall(r'\b(?:RBI|NPCI|UIDAI|IT\s+Department|HDFC|ICICI|SBI|AXIS|KOTAK|Government|Police|CIBIL)\b', text, re.I)
+        for match in identity_matches:
+            claims.append(Claim(match, "identity", 0.0))
+        
+        # Action claims (verbs + objects)
+        action_matches = re.findall(r'\b(?:click|pay|transfer|send|share|update|verify)\s+(?:link|amount|money|details|OTP|UPI|account)\b', text, re.I)
+        for match in action_matches:
+            claims.append(Claim(match, "action", 0.0))
         
         return claims
     
@@ -172,7 +171,6 @@ class SemanticCoherenceEngine:
     """Detects contradictions and confusion tactics used in scams"""
     def score(self, text: str) -> Tuple[float, List[str]]:
         """Returns INCOHERENCE score (0.0=clear, 1.0=confusing)"""
-        doc = nlp(text)
         issues = []
         score = 0.0
         
@@ -189,7 +187,8 @@ class SemanticCoherenceEngine:
             score += 0.25
         
         # Check for grammatical chaos (scams often have weird structure)
-        long_sentences = [sent for sent in doc.sents if len(sent.text.split()) > 30]
+        sentences = re.split(r'[.!?]+', text)
+        long_sentences = [s for s in sentences if len(s.split()) > 25]
         if long_sentences:
             issues.append(f"📜 Unusually long/confusing sentences: {len(long_sentences)}")
             score += 0.15
