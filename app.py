@@ -312,6 +312,29 @@ def main():
         if st.button("🔄 Analyze New Message", use_container_width=True):
             st.session_state.update({"msg":None,"profile":None,"stage":None})
             st.rerun()
+    # ---- persistent footer ----
+    st.markdown(
+        """
+        <div style="
+            text-align:center;
+            margin-top:40px;
+            padding:16px 0;
+            color:#8D6E63;
+            font-size:14px;
+        ">
+            Built with ❤️ by <b>Prakhar Mathur</b>, BITS Pilani<br/>
+            <span style="font-size:13px;">
+                Contact us: 
+                <a href="mailto:prakhar.mathur2020@gmail.com" 
+                   style="color:#FF8F00;text-decoration:none;font-weight:600;">
+                   your_email@domain.com
+                </a>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 
 if __name__=="__main__":
     main()
