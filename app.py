@@ -26,12 +26,9 @@ COLORS = {
     "SCAM": "#C1121C"
 }
 
-CP_AFT_LABELS = [
-    "account_threat","time_pressure","payment_request","credential_phish",
-    "kyc_fraud","lottery_fraud","job_scam","delivery_scam","refund_scam",
-    "investment_scam","romance_scam","charity_scam","qr_code_attack","fear_induction"
-]
-
+# NEW (must match Cell-6/8 exactly)
+CP_AFT_LABELS = ["AUTHORITY","URGENCY","FEAR","GREED",
+                 "SOCIAL_PROOF","SCARCITY","OBEDIENCE","TRUST"]
 LEGITIMATE_PATTERNS = {
     "bank_official": r'\b(?:HDFC|ICICI|SBI|AXIS|KOTAK|BOB|PNB)[\s]*(?:Bank|Ltd|Limited)\b|\bRBI\b|\bNPCI\b|\bIRDAI\b',
     "govt_official": r'\b(?:UIDAI|ITA|GST|EPFO|CBDT|MCA|CEIR)\b|\b(?:gov\.in|nic\.in|ac\.in)\b',
@@ -161,10 +158,11 @@ class CoreOrchestrator:
         tok, mdl, _, _ = load_model()
         inputs = tok(text,return_tensors="pt",truncation=True,padding=True).to(DEVICE)
         with torch.no_grad():
-            logits = mdl(**inputs).logits/self.T
-            probs = torch.sigmoid(logits).cpu().numpy()[0]
+            logits = mdl(**inputs).logits / float(cal["temperature"])
+            probs  = torch.sigmoid(logits).cpu().numpy()[0]
+            
         
-        detected = probs>self.thres
+        detected = probs > cal["thresholds"] 
         scam_signals = probs[detected].mean() if detected.any() else probs.max()*0.25
         
         leg_score, leg_proof = self.trust.score(text)
@@ -192,9 +190,6 @@ class CoreOrchestrator:
         return RiskProfile(round(float(risk*100),2),level,round(float(conf),2),
                            triggers,recos,leg_proof,claim_details,incoh_issues)
 
-# ============================================================
-# STREAMLIT UI (UX/PhD Level)
-# ============================================================
 # ===================================================================
 # AESTHETIC  STREAMLIT  UI  (drop-in replacement)
 # ===================================================================
