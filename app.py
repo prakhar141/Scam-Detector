@@ -327,7 +327,7 @@ def main():
                 Contact us: 
                 <a href="mailto:prakhar.mathur2020@gmail.com" 
                    style="color:#FF8F00;text-decoration:none;font-weight:600;">
-                   your_email@domain.com
+                   Meet my devloper
                 </a>
             </span>
         </div>
