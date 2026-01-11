@@ -162,7 +162,7 @@ class CoreOrchestrator:
             probs  = torch.sigmoid(logits).cpu().numpy()[0]
             
         
-        detected = probs > cal["thresholds"] 
+        detected = probs>self.thres 
         scam_signals = probs[detected].mean() if detected.any() else probs.max()*0.25
         
         leg_score, leg_proof = self.trust.score(text)
