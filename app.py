@@ -158,7 +158,7 @@ class CoreOrchestrator:
         tok, mdl, _, _ = load_model()
         inputs = tok(text,return_tensors="pt",truncation=True,padding=True).to(DEVICE)
         with torch.no_grad():
-            logits = mdl(**inputs).logits / float(cal["temperature"])
+            logits = mdl(**inputs).logits/self.T
             probs  = torch.sigmoid(logits).cpu().numpy()[0]
             
         
