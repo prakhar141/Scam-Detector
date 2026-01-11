@@ -322,7 +322,7 @@ def main():
             color:#8D6E63;
             font-size:14px;
         ">
-            Built with ❤️ by <b>Prakhar Mathur</b>, BITS Pilani<br/>
+            Built with ❤️ by <b>Prakhar Mathur</b>. BITS Pilani<br/>
             <span style="font-size:13px;">
                 Contact us: 
                 <a href="mailto:prakhar.mathur2020@gmail.com" 
