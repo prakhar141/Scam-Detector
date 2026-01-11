@@ -189,167 +189,129 @@ class CoreOrchestrator:
         
         return RiskProfile(round(float(risk*100),2),level,round(float(conf),2),
                            triggers,recos,leg_proof,claim_details,incoh_issues)
-
 # ============================================================
-# BHARATSCAM GUARDIAN  –  UNIQUE  LIGHT  UI
+# BHARATSCAM GUARDIAN  –  UNIQUE LIGHT-THEME UI
 # ============================================================
 import streamlit as st
 import time
-from pathlib import Path
 
-# ---------- unique colour palette ----------
-PALETTE = {
-    "bg": "#F4F7FE",                # soft lavender-white
-    "glass": "rgba(255, 255, 255, 0.55)",
-    "accent": "#6366F1",            # indigo
-    "success": "#10B981",
-    "warning": "#F59E0B",
-    "danger": "#EF4444",
-    "text": "#1E293B",
-    "mute": "#64748B"
+# ---------- colour palette (clean Indian summer) ----------
+THEME = {
+    "bg": "#FDFBF8",               # warm paper-white
+    "card": "#FFFFFF",
+    "accent": "#FF8F00",           # saffron accent
+    "safe": "#2E7D32",             # Indian-flag green
+    "caution": "#F57C00",          # soft amber
+    "suspicious": "#D32F2F",       # brick red
+    "scam": "#B71C1C",             # deep maroon
+    "text": "#3E2723",             # espresso brown
+    "subtle": "#8D6E63"            # warm grey
 }
 
-# ---------- glass-morphism css ----------
-GLASS_CSS = f"""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
-
-.stApp {{
-    background: linear-gradient(135deg, #E0E7FF 0%, #F4F7FE 100%);
-    font-family: 'Poppins', sans-serif;
-    color: {PALETTE["text"]};
-}}
-.glass-card {{
-    background: {PALETTE["glass"]};
-    border-radius: 20px;
-    padding: 28px;
-    margin-bottom: 28px;
-    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-}}
-.hero-glow {{
-    background: -webkit-linear-gradient(45deg, {PALETTE["accent"]}, #A78BFA);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-weight: 700;
-    letter-spacing: -1px;
-}}
-.stProgress > div > div > div > div {{
-    background: linear-gradient(90deg, {PALETTE["accent"]}, #A78BFA);
-    height: 10px;
-    border-radius: 5px;
-}}
-div.stButton > button {{
-    border: none;
-    color: #fff;
-    background: linear-gradient(90deg, {PALETTE["accent"]}, #8B5CF6);
-    font-weight: 600;
-    border-radius: 12px;
-    height: 52px;
-    font-size: 18px;
-    transition: transform .2s;
-}}
-div.stButton > button:hover {{
-    transform: scale(1.03);
-}}
-</style>
-"""
+# ---------- inject css ----------
+def local_css():
+    st.markdown(f"""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    .stApp {{background: {THEME["bg"]}; color: {THEME["text"]}; font-family: 'Inter', sans-serif;}}
+    .card {{background: {THEME["card"]}; border-radius: 16px; padding: 24px; margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #F5F0EB;}}
+    .stProgress > div > div > div > div {{background: linear-gradient(90deg,{THEME["accent"]} 0%, {THEME["caution"]} 100%);}}
+    div.stButton > button {{border: none; color: #FFF; background: linear-gradient(90deg,{THEME["accent"]} 0%, {THEME["caution"]} 100%);
+                            font-weight: 600; border-radius: 12px; height: 52px; font-size: 18px;}}
+    div.stButton > button:hover {{transform: scale(1.02);}}
+    h1,h2,h3 {{font-weight: 700; letter-spacing: -0.5px;}}
+    .subtle {{color: {THEME["subtle"]}; font-size: 14px;}}
+    </style>
+    """, unsafe_allow_html=True)
 
 # ---------- helpers ----------
 def init_state():
-    for k in ("msg", "profile", "stage"):
-        st.session_state[k] = None
+    for k in ["msg","profile","stage"]:
+        if k not in st.session_state:
+            st.session_state[k]=None
 
-def badge(level: str) -> str:
-    color = {"SAFE": PALETTE["success"], "CAUTION": PALETTE["warning"],
-             "SUSPICIOUS": PALETTE["danger"], "SCAM": PALETTE["danger"]}[level]
-    return f'<span style="background:{color}22; color:{color}; padding:6px 16px; border-radius:999px; font-weight:600;">{level}</span>'
+def risk_badge(level:str) -> str:
+    color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[level]
+    return f'<span style="background:{color}22;color:{color};padding:6px 16px;border-radius:999px;font-weight:600;">{level}</span>'
 
-# ---------- main ui ----------
+# ---------- page ----------
 def main():
     st.set_page_config(page_title="BharatScam Guardian", page_icon="🛡️", layout="centered")
-    st.markdown(GLASS_CSS, unsafe_allow_html=True)
+    local_css()
     init_state()
 
-    # ---- animated hero ----
+    # ---- hero ----
     st.markdown(f"""
-    <div style="text-align:center; margin-top:-60px; margin-bottom:40px;">
-        <h1 class="hero-glow" style="font-size:56px;">BharatScam Guardian</h1>
-        <p style="color:{PALETTE['mute']}; font-size:18px;">
-            Because even the best models get excited — we’ll warn you when we do 😉
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+        <div style="text-align:center;margin-top:-60px;margin-bottom:40px;">
+        <h1 style="font-size:52px;background:-webkit-linear-gradient(45deg,{THEME["accent"]},#FF6F00);
+                   -webkit-background-clip:text;-webkit-text-fill-color:transparent;">BharatScam Guardian</h1>
+        <p class="subtle">AI that smells a rat — but sometimes barks at shadows 🤖</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # ---- input glass card ----
-    with st.container():
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        msg = st.text_area(
-            label="",
-            placeholder="Paste the suspicious message here…",
-            height=180,
-            label_visibility="collapsed"
-        )
-        if st.button("🔍 Analyze Message", use_container_width=True) and msg.strip():
-            st.session_state.msg = msg
-            st.session_state.stage = "RUNNING"
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+    # ---- input ----
+    msg = st.text_area("", placeholder="Paste the suspicious message here…", height=180, label_visibility="collapsed")
+    if st.button("🛡️ Analyze Message", use_container_width=True) and msg.strip():
+        st.session_state.msg = msg
+        st.session_state.stage = "RUNNING"
+        st.rerun()
 
-    # ---- running glass card ----
-    if st.session_state.stage == "RUNNING":
+    # ---- running ----
+    if st.session_state.stage=="RUNNING":
         with st.container():
-            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.markdown('<div class="card"><h4>🤖 AI is thinking …</h4>', unsafe_allow_html=True)
             bar = st.progress(0)
             for i in range(100):
-                bar.progress(i + 1)
+                bar.progress(i+1)
                 time.sleep(0.005)
             orch = CoreOrchestrator(*load_model()[2:])
             st.session_state.profile = orch.infer(st.session_state.msg)
-            st.session_state.stage = "DONE"
+            st.session_state.stage="DONE"
             st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-    # ---- results glass cards ----
-    if st.session_state.stage == "DONE" and st.session_state.profile:
+    # ---- results ----
+    if st.session_state.stage=="DONE" and st.session_state.profile:
         p = st.session_state.profile
 
-        # top card
-        st.markdown(f'<div class="glass-card"><h3>Risk Score: {p.score}% {badge(p.level)}</h3>', unsafe_allow_html=True)
-        st.progress(float(p.score) / 100.0)
-        st.markdown(f'<p style="color:{PALETTE["mute"]};">Confidence: {p.confidence}%</p>', unsafe_allow_html=True)
+        # top card with personality hint
+        st.markdown(f'<div class="card"><h3>Risk Score: {p.score}% {risk_badge(p.level)}</h3>', unsafe_allow_html=True)
+        st.progress(float(p.score)/100.0)
+        st.markdown(f'<p class="subtle">Confidence: {p.confidence}% &nbsp; • &nbsp; '
+                    f'<small>🔍 <b>Tip:</b> I can over-call triggers; use your own judgement too.</small></p>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # sections with personality hints
+        # triggers (always show, even if empty)
+        st.markdown('<div class="card"><h4>🎯 Detected Scam Triggers</h4>', unsafe_allow_html=True)
+        if p.triggers:
+            for k,v in p.triggers.items():
+                st.error(f"{k.replace('_',' ').title()}: {float(v):.1%}")
+        else:
+            st.info("No specific triggers fired — message looks clean on this axis.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # other sections
         sections = [
             ("✅ Legitimacy Anchors", p.legitimacy_proof, "success"),
             ("🔬 Claim Verifiability", p.claim_analysis, "info"),
             ("⚠️ Coherence Issues", p.coherence_issues, "warning"),
-            ("🎯 Detected Scam Triggers", p.triggers, "error"),
             ("💡 Recommended Actions", p.recos, None)
         ]
         for title, items, flag in sections:
             if items:
-                st.markdown(f'<div class="glass-card"><h4>{title}</h4>', unsafe_allow_html=True)
+                st.markdown(f'<div class="card"><h4>{title}</h4>', unsafe_allow_html=True)
                 for x in items:
-                    if flag == "success": st.success(x)
-                    elif flag == "info": st.info(x)
-                    elif flag == "warning": st.warning(x)
-                    elif flag == "error": st.error(x)
+                    if flag=="success": st.success(x)
+                    elif flag=="info": st.info(x)
+                    elif flag=="warning": st.warning(x)
                     else: st.write(f"- {x}")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-        # playful footer
-        st.markdown(f'<p style="text-align:center;color:{PALETTE["mute"]};font-size:14px;">'
-                    'Guardian sometimes barks at shadows — always double-check with official sources!</p>',
-                    unsafe_allow_html=True)
-
         # reset
         if st.button("🔄 Analyze New Message", use_container_width=True):
-            st.session_state.update({"msg": None, "profile": None, "stage": None})
+            st.session_state.update({"msg":None,"profile":None,"stage":None})
             st.rerun()
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
