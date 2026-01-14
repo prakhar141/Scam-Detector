@@ -259,14 +259,12 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # ---- input ----
     # ---------- input mode toggle ----------
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        mode = tog.st_toggle_switch(label="",
-                                    key="mode",
-                                    default_value=False,
-                                    label_after="🎤 Speak" if st.session_state.get("mode") else "⌨️ Type")
+    col_a, col_b, col_c = st.columns([1, 1, 4])
+    with col_a:
+        st.markdown("### Mode")
+    with col_b:
+        mode = st.toggle("🎤 Speak", value=False, key="mode_key")
 
     # ---------- unified text box ----------
     if st.session_state.get("mode"):          # SPEECH MODE
@@ -353,6 +351,7 @@ def main():
         if st.button("🔄 Analyze New Message", use_container_width=True):
             st.session_state.update({"msg":None,"profile":None,"stage":None})
             st.rerun()
+
     # ---- persistent footer ----
     st.markdown(
         """
