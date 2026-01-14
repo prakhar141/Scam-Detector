@@ -318,25 +318,25 @@ def main():
             # run Whisper only once per new recording
             if st.session_state.get("_last_audio_hash") != hash(audio_bytes):
                 st.session_state._last_audio_hash = hash(audio_bytes)
-                with st.spinner("Transcribing…"):
+                with st.spinner("🧠 Turning your voice into words…"):
                     model = load_whisper()
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                         tmp.write(audio_bytes.read())
                         tmp.flush()
-                        result = model.transcribe(tmp.name, language="en", fp16=False)
+                        result = model.transcribe(tmp.name,fp16=False)
                     st.session_state["msg"] = result["text"].strip()
         msg = st.text_area("", value=st.session_state.get("msg", ""),
-                           placeholder="Your speech will appear here…",
+                           placeholder="🎙️ I’m listening…",
                            height=180, label_visibility="collapsed")
     else:                                     # TYPE MODE
         msg = st.text_area("", value=st.session_state.get("msg", ""),
-                           placeholder="Paste the suspicious message here…",
+                           placeholder="💬 Paste it here — I’ll take a look.",
                            height=180, label_visibility="collapsed")
 
     # keep single source of truth
     st.session_state.msg = msg
 
-    if st.button("🛡️ Analyze Message", use_container_width=True) and msg.strip():
+    if st.button("🛡️ Guard This Message", use_container_width=True) and msg.strip():
         st.session_state.msg = msg
         st.session_state.stage = "RUNNING"
         st.rerun()
@@ -344,7 +344,7 @@ def main():
     # ---- running ----
     if st.session_state.stage=="RUNNING":
         with st.container():
-            st.markdown('<div class="card"><h4>🤖 AI is thinking …</h4>', unsafe_allow_html=True)
+            st.markdown('<div class="card"><h4>🔍 Reading between the lines…</h4>', unsafe_allow_html=True)
             bar = st.progress(0)
             for i in range(100):
                 bar.progress(i+1)
