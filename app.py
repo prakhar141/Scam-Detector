@@ -495,7 +495,7 @@ def main():
                             result = model.transcribe(tmp_path, language="hi", fp16=False)
                             text = result.get("text","").strip()
                         # ---- KEY FIX: assign to a *different* key, then rerun ----
-                        st.session_state["_whisper_text"] = text
+                        st.session_state["msg"] = text
                         st.rerun()
                     finally:
                         # delete temp file
@@ -503,29 +503,10 @@ def main():
                         if os.path.exists(tmp_path):
                             os.remove(tmp_path)
 
-    # ---------- unified text box ----------
-    # Prefill only once per new Whisper result
-    if "_whisper_text" in st.session_state:
-        # pass the transcript as the *default* value on first render
-        msg = st.text_area(
-            "",
-            value=st.session_state.pop("_whisper_text"),   # pop → use once
-            key="msg",
-            placeholder="🎙️ I’m listening…" if mode else "💬 Paste it here – I’ll take a look.",
-            height=180,
-            label_visibility="collapsed"
-        )
-    else:
-        # normal run: pull current state (may be empty)
-        msg = st.text_area(
-            "",
-            value=st.session_state.get("msg", ""),
-            key="msg",
-            placeholder="🎙️ I’m listening…" if mode else "💬 Paste it here – I’ll take a look.",
-            height=180,
-            label_visibility="collapsed"
-        )
-
+    # ---------- unified text box ----------#
+    
+    msg = st.text_area("",key="msg",placeholder="🎙️ I’m listening…" if mode else "💬 Paste it here – I’ll take a look.",height=180,label_visibility="collapsed")
+        
     # single source of truth from here on
     
 
@@ -573,8 +554,7 @@ def main():
             
              
              
-             
-
+            
     # ---- persistent footer ----
     st.markdown(
         """
