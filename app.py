@@ -568,7 +568,7 @@ def main():
              st.session_state.pop("msg", None)
              st.session_state.pop("profile", None)
              st.session_state.pop("stage", None)
-            st.rerun()
+             st.rerun()
             
             
              
