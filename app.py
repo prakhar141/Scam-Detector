@@ -266,6 +266,9 @@ def main():
         <p class="subtle">AI that smells a rat — but sometimes barks at shadows 🤖</p>
         </div>
         """, unsafe_allow_html=True)
+    if "mode" not in st.session_state:
+        st.session_state.mode = False
+
     # ---------- language-capability hint ----------
     hint = (
         "🎙️ Speech  –  English only"
@@ -293,9 +296,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    if "mode" not in st.session_state:
-        st.session_state.mode = False
-
+    
     # click detector
     if st.button(
         label=f"{'🎤'} Speak" if st.session_state.mode else f"{'⌨️'} Type",
