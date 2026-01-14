@@ -527,7 +527,7 @@ def main():
         )
 
     # single source of truth from here on
-    st.session_state.msg = msg
+    
 
     # ---------- glowing analyse button ----------
     col1,col2,col3 = st.columns([1,2,1])
