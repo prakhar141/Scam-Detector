@@ -276,7 +276,7 @@ def main():
 
     # ---------- language-capability hint ----------
     hint = (
-        "🎙️ Speech  –  English only"
+        "🎙️ Speech  –  English (Best Results)"
         if st.session_state.mode else
         "💬 Text  –  Hindi, English, Hinglish"
     )
