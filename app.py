@@ -229,7 +229,7 @@ THEME = {
 def local_css():
     st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400 ;600;700&display=swap');
     .stApp {{background: {THEME["bg"]}; color: {THEME["text"]}; font-family: 'Inter', sans-serif;}}
     .card {{background: {THEME["card"]}; border-radius: 16px; padding: 24px; margin-bottom: 24px;
             box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #F5F0EB;}}
@@ -269,13 +269,32 @@ def main():
         """, unsafe_allow_html=True)
 
     # ---- input ----
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        mode = st.toggle("🎤 Speak", value=False, key="mode")
-        st.caption("Type" if not mode else "Speak")
-                                    
-                                    
-                                
+    # ---------- UNIQUE TOGGLE ----------
+    st.markdown("""
+    <style>
+      .toggle-pill{
+        display:inline-flex;align-items:center;border-radius:999px;
+        padding:6px 14px;font-weight:600;cursor:pointer;
+        transition:all .3s ease;
+      }
+      .off{background:#e0e0e0;color:#333}
+      .on{background:#ff8f00;color:#fff}
+    </style>
+    """, unsafe_allow_html=True)
+
+    if "mode" not in st.session_state:
+        st.session_state.mode = False
+
+    # click detector
+    if st.button(
+        label=f"{'🎤'} Speak" if st.session_state.mode else f"{'⌨️'} Type",
+        key="pill_toggle",
+        help="Switch input mode"
+    ):
+        st.session_state.mode = not st.session_state.mode
+        st.rerun()
+
+    mode = st.session_state.mode
 
     # ---------- unified text box ----------
     if st.session_state.get("mode"):          # SPEECH MODE
