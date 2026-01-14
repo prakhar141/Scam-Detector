@@ -565,8 +565,15 @@ def main():
 
         # reset
         if st.button("🔄 Analyze New Message", use_container_width=True):
-            st.session_state.update({"msg":None,"profile":None,"stage":None})
+             st.session_state.pop("msg", None)
+             st.session_state.pop("profile", None)
+             st.session_state.pop("stage", None)
             st.rerun()
+            
+            
+             
+             
+             
 
     # ---- persistent footer ----
     st.markdown(
