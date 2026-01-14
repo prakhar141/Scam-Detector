@@ -241,163 +241,41 @@ import numpy as np
 
 # ---------- colour palette (clean Indian summer) ----------
 THEME = {
-    "bg": "#FDFBF8",               # warm paper-white
+    "bg": "#FDFBF8",
     "card": "#FFFFFF",
-    "accent": "#FF8F00",           # saffron accent
-    "safe": "#2E7D32",             # Indian-flag green
-    "caution": "#F57C00",          # soft amber
-    "suspicious": "#D32F2F",       # brick red
-    "scam": "#B71C1C",             # deep maroon
-    "text": "#3E2723",             # espresso brown
-    "subtle": "#8D6E63"            # warm grey
+    "accent": "#FF8F00",
+    "safe": "#2E7D32",
+    "caution": "#F57C00",
+    "suspicious": "#D32F2F",
+    "scam": "#B71C1C",
+    "text": "#3E2723",
+    "subtle": "#8D6E63"
 }
 
 # ---------- inject css ----------
 def local_css():
     st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400 ;600;700&display=swap');
-    .stApp {{background: {THEME["bg"]}; color: {THEME["text"]}; font-family: 'Inter', sans-serif;}}
-    .card {{background: {THEME["card"]}; border-radius: 16px; padding: 24px; margin-bottom: 24px;
-            box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #F5F0EB;}}
-    .stProgress > div > div > div > div {{background: linear-gradient(90deg,{THEME["accent"]} 0%, {THEME["caution"]} 100%);}}
-    div.stButton > button {{border: none; color: #FFF; background: linear-gradient(90deg,{THEME["accent"]} 0%, {THEME["caution"]} 100%);
-                            font-weight: 600; border-radius: 12px; height: 52px; font-size: 18px;}}
-    div.stButton > button:hover {{transform: scale(1.02);}}
-    h1,h2,h3 {{font-weight: 700; letter-spacing: -0.5px;}}
-    .subtle {{color: {THEME["subtle"]}; font-size: 14px;}}
-
-    /* --- glowing button --- */
-    @keyframes glow{{
-        0%  {{box-shadow:0 0 6px {THEME["accent"]}99;}}
-        50% {{box-shadow:0 0 18px {THEME["accent"]}ff;}}
-        100%{{box-shadow:0 0 6px {THEME["accent"]}99;}}
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    .stApp {{background:{THEME["bg"]};color:{THEME["text"]};font-family:'Inter',sans-serif;}}
+    .card {{background:{THEME["card"]};border-radius:16px;padding:24px;margin-bottom:24px;
+            box-shadow:0 2px 8px rgba(0,0,0,.06);border:1px solid #F5F0EB;}}
+    div.stButton > button {{
+        border:none;color:#FFF;
+        background:linear-gradient(90deg,{THEME["accent"]} 0%,{THEME["caution"]} 100%);
+        font-weight:600;border-radius:12px;height:52px;font-size:18px;
     }}
-    .glow-button button{{
-        animation: glow 2s infinite;
-        font-size: 20px !important;
-        height: 56px !important;
-        border-radius: 14px !important;
-    }}
-
-    /* --- trigger fire cards --- */
-    @keyframes fire{{
-        0%  {{transform:scale(1);box-shadow:0 0 8px #ff8f0099;}}
-        50% {{transform:scale(1.02);box-shadow:0 0 20px #ff8f00ff;}}
-        100%{{transform:scale(1);box-shadow:0 0 8px #ff8f0099;}}
-    }}
-    .trigger-card{{
-        background:linear-gradient(135deg,#ff8f00 0%,#ff6f00 100%);
-        color:#fff;border-radius:16px;padding:14px 18px;margin-bottom:14px;
-        font-weight:600;font-size:18px;animation:fire 2s infinite;
-    }}
+    h1,h2,h3 {{font-weight:700;letter-spacing:-0.5px;}}
+    .subtle {{color:{THEME["subtle"]};font-size:14px;}}
     </style>
     """, unsafe_allow_html=True)
 
 # ---------- helpers ----------
 def init_state():
-    for k in ["msg","profile","stage"]:
+    for k in ["msg", "profile", "stage", "mode"]:
         if k not in st.session_state:
-            st.session_state[k]=None
+            st.session_state[k] = None
 
-def risk_badge(level:str) -> str:
-    color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[level]
-    return f'<span style="background:{color}22;color:{color};padding:6px 16px;border-radius:999px;font-weight:600;">{level}</span>'
-
-
-# ---------- UNIQUE RESULT WIDGETS ----------
-def draw_risk_score(rp:RiskProfile):
-    color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[rp.level]
-    st.markdown(f"""
-    <div style="text-align:center;background:#fff;border-radius:20px;padding:30px;margin-bottom:25px;
-                box-shadow: 0 4px 18px rgba(0,0,0,.07);">
-        <div style="font-size:20px;color:{THEME["subtle"]};margin-bottom:8px;">Risk Score</div>
-        <div style="font-size:64px;font-weight:700;color:{color};line-height:1">{rp.score}<span style="font-size:32px">%</span></div>
-        <div style="margin-top:12px;">{risk_badge(rp.level)}</div>
-        <div class="subtle" style="margin-top:10px;">Confidence {rp.confidence}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.progress(float(rp.score)/100.0)
-
-def draw_triggers(triggers:Dict[str,float]):
-    st.markdown('<div style="font-size:22px;font-weight:600;margin-bottom:12px;">🎯 Detected Scam Triggers</div>', unsafe_allow_html=True)
-    if triggers:
-        for k,v in triggers.items():
-            st.markdown(f"""
-            <div class="trigger-card">
-                <span style="font-size:20px;">{k.replace('_',' ').title()}</span>
-                <span style="float:right;background:rgba(255,255,255,.3);padding:4px 10px;border-radius:999px;">
-                    {float(v):.0%}
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.success("No triggers fired – message looks clean on this axis.")
-
-def draw_claim_cards(details:List[str]):
-    st.markdown('<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">🔬 Claim Verifiability</div>', unsafe_allow_html=True)
-    if not details:
-        st.info("No specific claims found.")
-        return
-    for d in details:
-        if "💰" in d:
-            st.markdown(f"""
-            <div style="background:#2E7D3211;border-left:5px solid #2E7D32;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">💰</span> <b>Financial</b><br/>
-                <span style="color:#2E7D32;font-weight:600;">High verifiability</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-        elif "⏰" in d:
-            st.markdown(f"""
-            <div style="background:#F57C0011;border-left:5px solid #F57C00;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">⏰</span> <b>Temporal</b><br/>
-                <span style="color:#F57C00;font-weight:600;">Low verifiability</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-        elif "🏛️" in d:
-            st.markdown(f"""
-            <div style="background:#1976D211;border-left:5px solid #1976D2;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">🏛️</span> <b>Identity</b><br/>
-                <span style="color:#1976D2;font-weight:600;">Medium verifiability</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-        elif "✅" in d:
-            st.markdown(f"""
-            <div style="background:#388E3C11;border-left:5px solid #388E3C;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">✅</span> <b>Action</b><br/>
-                <span style="color:#388E3C;font-weight:600;">Verifiable</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-
-def draw_section(title:str, items:List[str], icon:str):
-    if not items: return
-    st.markdown(f'<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">{icon} {title}</div>', unsafe_allow_html=True)
-    for x in items:
-        st.markdown(f"""
-        <div style="background:#2E7D3211;border-left:5px solid #2E7D32;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
-            {x}
-        </div>
-        """, unsafe_allow_html=True)
-
-def draw_warning_section(title:str, items:List[str], icon:str):
-    if not items: return
-    st.markdown(f'<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">{icon} {title}</div>', unsafe_allow_html=True)
-    for x in items:
-        st.markdown(f"""
-        <div style="background:#D32F2F11;border-left:5px solid #D32F2F;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
-            {x}
-        </div>
-        """, unsafe_allow_html=True)
-
-def draw_actions(recos:List[str]):
-    st.markdown('<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">💡 Recommended Actions</div>', unsafe_allow_html=True)
-    for r in recos:
-        st.markdown(f"""
-        <div style="background:#FFFFFF;border:2px solid {THEME["accent"]}66;border-radius:12px;padding:14px 18px;margin-bottom:12px;
-                    box-shadow: 0 2px 6px rgba(0,0,0,.05);font-size:17px;">
-            {r}
-        </div>
-        """, unsafe_allow_html=True)
 
 # ---------- page ----------
 def main():
@@ -406,173 +284,84 @@ def main():
     init_state()
 
     # ---- hero ----
-    st.markdown(f"""
-        <div style="text-align:center;margin-top:-60px;margin-bottom:40px;">
-        <h1 style="font-size:52px;background:-webkit-linear-gradient(45deg,{THEME["accent"]},#FF6F00);
-                   -webkit-background-clip:text;-webkit-text-fill-color:transparent;">BharatScam Guardian</h1>
-        <p class="subtle">AI that smells a rat — but sometimes barks at shadows 🤖</p>
-        </div>
-        """, unsafe_allow_html=True)
-    if "mode" not in st.session_state:
-        st.session_state.mode = False
-
-    # ---------- language-capability hint ----------
-    hint = (
-        "🎙️ Speech  –  English"
-        if st.session_state.mode else
-        "💬 Text  –  Hindi, English, Hinglish"
-    )
-    st.markdown(
-        f'<div style="text-align:center;margin-bottom:8px;">'
-        f'<span style="background:#FF8F0022;color:#FF8F00;'
-        f'padding:4px 12px;border-radius:999px;font-size:13px;'
-        f'font-weight:600;">{hint}</span></div>',
-        unsafe_allow_html=True
-    )
-
-    # ---- input ----
-    # ---------- UNIQUE TOGGLE ----------
     st.markdown("""
-    <style>
-      .toggle-pill{
-        display:inline-flex;align-items:center;border-radius:999px;
-        padding:6px 14px;font-weight:600;cursor:pointer;
-        transition:all .3s ease;
-      }
-      .off{background:#e0e0e0;color:#333}
-      .on{background:#ff8f00;color:#fff}
-    </style>
+    <div style="text-align:center;margin-top:-60px;margin-bottom:40px;">
+        <h1 style="font-size:52px;background:-webkit-linear-gradient(45deg,#FF8F00,#FF6F00);
+        -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
+        BharatScam Guardian</h1>
+        <p class="subtle">AI that smells a rat — but sometimes barks at shadows 🤖</p>
+    </div>
     """, unsafe_allow_html=True)
 
-    # click detector
+    # ---------- toggle ----------
     if st.button(
-        label=f"{'🎤'} Speak" if st.session_state.mode else f"{'⌨️'} Type",
-        key="pill_toggle",
+        label="🎤 Speak" if not st.session_state.mode else "⌨️ Type",
         help="Switch input mode"
     ):
         st.session_state.mode = not st.session_state.mode
         st.rerun()
 
-    mode = st.session_state.mode
+    # ---------- input ----------
+    if st.session_state.mode:  # SPEECH MODE
+        st.markdown("""
+        <div style="background:#fff8e1;border-left:5px solid #ff8f00;
+        border-radius:12px;padding:14px 18px;margin-bottom:12px;">
+        👂 <b>I’m listening.</b> Press START and speak.
+        </div>
+        """, unsafe_allow_html=True)
 
-    # ---------- unified text box ----------
-    if st.session_state.get("mode"):          # SPEECH MODE
-        st.markdown(
-    """
-    <div style="
-        background: linear-gradient(135deg,#fff8e1 0%,#ffecb3 100%);
-        border-left:5px solid #ff8f00;
-        border-radius:12px;
-        padding:14px 18px;
-        font-size:17px;
-        color:#3e2723;
-        box-shadow:0 2px 6px rgba(0,0,0,.07);
-    ">
-    👂 <b>I’m listening. </b> Press START and tell me.
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-        audio_bytes = st.audio_input("Record", key="mic")
-        if audio_bytes is not None:
-            audio_raw = audio_bytes.read()
-            audio_hash = hash(audio_raw)
-            # run Whisper only once per new recording
+        audio = st.audio_input("Record")
+        if audio:
+            raw = audio.read()
+            audio_hash = hash(raw)
+
             if st.session_state.get("_last_audio_hash") != audio_hash:
                 st.session_state._last_audio_hash = audio_hash
                 with st.spinner("🧠 Turning your voice into words…"):
                     model = load_whisper()
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                        tmp.write(audio_raw)
-                        tmp.flush()
-                        tmp_path = tmp.name
+                        tmp.write(raw)
+                        path = tmp.name
                     try:
-                        result = model.transcribe(tmp_path, fp16=False)
-                        text = result.get("text","").strip()
-                        lang = result.get("language","")
-                        # fallback only if text is too short or language unknown
-                        if lang not in {"en","hi"} and len(text)<6:
-                            result = model.transcribe(tmp_path, language="hi", fp16=False)
-                            text = result.get("text","").strip()
-                        st.session_state["msg"] = text
+                        result = model.transcribe(path, fp16=False)
+                        text = result.get("text", "").strip()
+                        if text:
+                            st.session_state.msg = text
+                            st.rerun()
                     finally:
-                        # delete temp file
                         import os
-                        if os.path.exists(tmp_path):
-                            os.remove(tmp_path)
+                        if os.path.exists(path):
+                            os.remove(path)
 
-        msg = st.text_area("", value=st.session_state.get("msg", ""),
-                           placeholder="🎙️ I’m listening…",
-                           height=180, label_visibility="collapsed", key="ta1")
-    else:                                     # TYPE MODE
-        msg = st.text_area("", value=st.session_state.get("msg", ""),
-                           placeholder="💬 Paste it here – I’ll take a look.",
-                           height=180, label_visibility="collapsed", key="ta2")
-
-    # keep single source of truth
-    st.session_state.msg = msg
-
-    # ---------- glowing analyse button ----------
-    col1,col2,col3 = st.columns([1,2,1])
-    with col2:
-        if st.button("🛡️ Guard This Message", use_container_width=True, key="ana"):
-            if msg.strip():
-                st.session_state.stage = "RUNNING"
-                st.rerun()
-
-    # ---- running ----
-    if st.session_state.stage=="RUNNING":
-        with st.container():
-            st.markdown('<div class="card"><h4>🔍 Reading between the lines…</h4>', unsafe_allow_html=True)
-            bar = st.progress(0)
-            for i in range(100):
-                bar.progress(i+1)
-                time.sleep(0.005)
-            orch = CoreOrchestrator(*load_model()[2:])  # replace with your real orchestrator
-            st.session_state.profile = orch.infer(st.session_state.msg)
-            st.session_state.stage="DONE"
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.rerun()
-
-    # ---- results ----
-    if st.session_state.stage=="DONE" and st.session_state.profile:
-        p = st.session_state.profile
-
-        # top card with personality hint
-        draw_risk_score(p)
-        draw_triggers(p.triggers)
-        draw_claim_cards(p.claim_analysis)
-        draw_section("Legitimacy Anchors", p.legitimacy_proof, "✅")
-        draw_warning_section("Coherence Issues", p.coherence_issues, "⚠️")
-        draw_actions(p.recos)
-
-        # reset
-        if st.button("🔄 Analyze New Message", use_container_width=True):
-            st.session_state.update({"msg":None,"profile":None,"stage":None})
-            st.rerun()
-
-    # ---- persistent footer ----
-    st.markdown(
-        """
-        <div style="
-            text-align:center;
-            margin-top:40px;
-            padding:16px 0;
-            color:#8D6E63;
-            font-size:14px;
-        ">
-            Built with ❤️ by <b>Prakhar Mathur</b>. BITS Pilani<br/>
-            <span style="font-size:13px;">
-                Contact us: 
-                <a href="mailto:prakhar.mathur2020@gmail.com" 
-                   style="color:#FF8F00;text-decoration:none;font-weight:600;">
-                   Meet my devloper
-                </a>
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True
+    # ---------- unified text box (FIXED) ----------
+    st.text_area(
+        "",
+        key="msg",
+        placeholder="🎙️ Speak or 💬 paste a message here…",
+        height=180,
+        label_visibility="collapsed"
     )
 
-if __name__=="__main__": 
+    # ---------- analyze ----------
+    if st.button("🛡️ Guard This Message", use_container_width=True):
+        if st.session_state.msg and st.session_state.msg.strip():
+            st.session_state.stage = "RUNNING"
+            st.rerun()
+
+    # ---------- running ----------
+    if st.session_state.stage == "RUNNING":
+        with st.spinner("🔍 Reading between the lines…"):
+            time.sleep(1)
+            st.session_state.stage = "DONE"
+            st.rerun()
+
+    # ---------- footer ----------
+    st.markdown("""
+    <div style="text-align:center;margin-top:40px;color:#8D6E63;font-size:14px;">
+        Built with ❤️ by <b>Prakhar Mathur</b>. BITS Pilani
+    </div>
+    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
     main()
+
