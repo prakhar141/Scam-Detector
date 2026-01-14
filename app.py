@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from typing import List, Tuple, Dict
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from huggingface_hub import hf_hub_download
-
+# >>> WHISPER START <<<
+import whisper, tempfile, io
+import streamlit_toggle as tog   # pip install streamlit-toggle-switch-pkg
+# >>> WHISPER END <<<
 # ============================================================
 # GLOBAL CONFIG
 # ============================================================
@@ -143,6 +146,12 @@ def load_model():
     mdl = AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR).to(DEVICE).eval()
     with open(LOCAL_DIR/"scam_v1.json") as f: cal=json.load(f)
     return tok, mdl, float(cal["temperature"]), np.array(cal["thresholds"])
+# >>> WHISPER START <<<
+@st.cache_resource
+def load_whisper():
+    # tiny ≈ 75 MB, fastest for CPU Streamlit-cloud
+    return whisper.load_model("tiny")
+# >>> WHISPER END <<<
 
 # ============================================================
 # CORE ORCHESTRATOR
@@ -251,7 +260,39 @@ def main():
         """, unsafe_allow_html=True)
 
     # ---- input ----
-    msg = st.text_area("", placeholder="Paste the suspicious message here…", height=180, label_visibility="collapsed")
+    # ---------- input mode toggle ----------
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        mode = tog.st_toggle_switch(label="",
+                                    key="mode",
+                                    default_value=False,
+                                    label_after="🎤 Speak" if st.session_state.get("mode") else "⌨️ Type")
+
+    # ---------- unified text box ----------
+    if st.session_state.get("mode"):          # SPEECH MODE
+        st.info("🎤 Press START, speak, then press STOP – text will appear automatically.")
+        audio_bytes = st.audio_input("Record", key="mic")
+        if audio_bytes is not None:
+            # run Whisper only once per new recording
+            if st.session_state.get("_last_audio_hash") != hash(audio_bytes):
+                st.session_state._last_audio_hash = hash(audio_bytes)
+                with st.spinner("Transcribing…"):
+                    model = load_whisper()
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                        tmp.write(audio_bytes.read())
+                        tmp.flush()
+                        result = model.transcribe(tmp.name, language="en", fp16=False)
+                    st.session_state["msg"] = result["text"].strip()
+        msg = st.text_area("", value=st.session_state.get("msg", ""),
+                           placeholder="Your speech will appear here…",
+                           height=180, label_visibility="collapsed")
+    else:                                     # TYPE MODE
+        msg = st.text_area("", value=st.session_state.get("msg", ""),
+                           placeholder="Paste the suspicious message here…",
+                           height=180, label_visibility="collapsed")
+
+    # keep single source of truth
+    st.session_state.msg = msg
     if st.button("🛡️ Analyze Message", use_container_width=True) and msg.strip():
         st.session_state.msg = msg
         st.session_state.stage = "RUNNING"
@@ -260,7 +301,7 @@ def main():
     # ---- running ----
     if st.session_state.stage=="RUNNING":
         with st.container():
-            st.markdown('<div class="card"><h4>🤖 AI is thinking …</h4>', unsafe_allow_html=True)
+            st.markdown('<div class="card"><h4>🤖 I am thinking …</h4>', unsafe_allow_html=True)
             bar = st.progress(0)
             for i in range(100):
                 bar.progress(i+1)
