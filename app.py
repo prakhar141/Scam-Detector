@@ -14,6 +14,7 @@ from huggingface_hub import hf_hub_download
 import whisper, tempfile, io
 import streamlit_toggle as tog   # pip install streamlit-toggle-switch-pkg
 # >>> WHISPER END <<<
+
 # ============================================================
 # GLOBAL CONFIG
 # ============================================================
@@ -201,6 +202,7 @@ class CoreOrchestrator:
         
         return RiskProfile(round(float(risk*100),2),level,round(float(conf),2),
                            triggers,recos,leg_proof,claim_details,incoh_issues)
+
 # ============================================================
 # BHARATSCAM GUARDIAN  –  UNIQUE LIGHT-THEME UI
 # ============================================================
@@ -229,7 +231,7 @@ THEME = {
 def local_css():
     st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400 ;600;700&display=swap');
     .stApp {{background: {THEME["bg"]}; color: {THEME["text"]}; font-family: 'Inter', sans-serif;}}
     .card {{background: {THEME["card"]}; border-radius: 16px; padding: 24px; margin-bottom: 24px;
             box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #F5F0EB;}}
@@ -239,6 +241,34 @@ def local_css():
     div.stButton > button:hover {{transform: scale(1.02);}}
     h1,h2,h3 {{font-weight: 700; letter-spacing: -0.5px;}}
     .subtle {{color: {THEME["subtle"]}; font-size: 14px;}}
+
+    /* --- unique text-area --- */
+    .unique-textarea textarea {{
+        border-radius: 18px;
+        border: 2px dashed {THEME["accent"]}66;
+        background: #FFF9F0;
+        font-size: 17px;
+        padding: 20px;
+        transition: all .3s ease;
+    }}
+    .unique-textarea textarea:focus{{
+        border-style: solid;
+        border-color: {THEME["accent"]};
+        box-shadow: 0 0 0 3px {THEME["accent"]}33;
+    }}
+
+    /* --- glowing button --- */
+    @keyframes glow{{
+        0%  {{box-shadow:0 0 6px {THEME["accent"]}99;}}
+        50% {{box-shadow:0 0 18px {THEME["accent"]}ff;}}
+        100%{{box-shadow:0 0 6px {THEME["accent"]}99;}}
+    }}
+    .glow-button button{{
+        animation: glow 2s infinite;
+        font-size: 20px !important;
+        height: 56px !important;
+        border-radius: 14px !important;
+    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -256,6 +286,62 @@ def risk_badge(level:str) -> str:
 @st.cache_resource
 def load_whisper():
     return whisper.load_model("tiny")
+
+# ---------- UNIQUE RESULT WIDGETS ----------
+def draw_risk_score(rp:RiskProfile):
+    color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[rp.level]
+    st.markdown(f"""
+    <div style="text-align:center;background:#fff;border-radius:20px;padding:30px;margin-bottom:25px;
+                box-shadow: 0 4px 18px rgba(0,0,0,.07);">
+        <div style="font-size:20px;color:{THEME["subtle"]};margin-bottom:8px;">Risk Score</div>
+        <div style="font-size:64px;font-weight:700;color:{color};line-height:1">{rp.score}<span style="font-size:32px">%</span></div>
+        <div style="margin-top:12px;">{risk_badge(rp.level)}</div>
+        <div class="subtle" style="margin-top:10px;">Confidence {rp.confidence}%</div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.progress(float(rp.score)/100.0)
+
+def draw_triggers(triggers:Dict[str,float]):
+    st.markdown('<div style="font-size:22px;font-weight:600;margin-bottom:12px;">🎯 Detected Scam Triggers</div>', unsafe_allow_html=True)
+    if triggers:
+        for k,v in triggers.items():
+            st.markdown(f"""
+            <div style="background:#FF8F0011;border-left:5px solid #FF8F00;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
+                <b>{k.replace('_',' ').title()}</b>  <span style="float:right;color:#FF8F00;font-weight:700">{float(v):.0%}</span>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.success("No triggers fired – message looks clean on this axis.")
+
+def draw_section(title:str, items:List[str], icon:str):
+    if not items: return
+    st.markdown(f'<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">{icon} {title}</div>', unsafe_allow_html=True)
+    for x in items:
+        st.markdown(f"""
+        <div style="background:#2E7D3211;border-left:5px solid #2E7D32;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
+            {x}
+        </div>
+        """, unsafe_allow_html=True)
+
+def draw_warning_section(title:str, items:List[str], icon:str):
+    if not items: return
+    st.markdown(f'<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">{icon} {title}</div>', unsafe_allow_html=True)
+    for x in items:
+        st.markdown(f"""
+        <div style="background:#D32F2F11;border-left:5px solid #D32F2F;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
+            {x}
+        </div>
+        """, unsafe_allow_html=True)
+
+def draw_actions(recos:List[str], level:str):
+    st.markdown('<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">💡 Recommended Actions</div>', unsafe_allow_html=True)
+    for r in recos:
+        st.markdown(f"""
+        <div style="background:#FFFFFF;border:2px solid {THEME["accent"]}66;border-radius:12px;padding:14px 18px;margin-bottom:12px;
+                    box-shadow: 0 2px 6px rgba(0,0,0,.05);font-size:17px;">
+            {r}
+        </div>
+        """, unsafe_allow_html=True)
 
 # ---------- page ----------
 def main():
@@ -361,19 +447,22 @@ def main():
 
         msg = st.text_area("", value=st.session_state.get("msg", ""),
                            placeholder="🎙️ I’m listening…",
-                           height=180, label_visibility="collapsed")
+                           height=180, label_visibility="collapsed", key="ta1")
     else:                                     # TYPE MODE
         msg = st.text_area("", value=st.session_state.get("msg", ""),
                            placeholder="💬 Paste it here — I’ll take a look.",
-                           height=180, label_visibility="collapsed")
+                           height=180, label_visibility="collapsed", key="ta2")
 
     # keep single source of truth
     st.session_state.msg = msg
 
-    if st.button("🛡️ Guard This Message", use_container_width=True) and msg.strip():
-        st.session_state.msg = msg
-        st.session_state.stage = "RUNNING"
-        st.rerun()
+    # ---------- glowing analyse button ----------
+    col1,col2,col3 = st.columns([1,2,1])
+    with col2:
+        if st.button("🛡️ Guard This Message", use_container_width=True, key="ana", help=None):
+            if msg.strip():
+                st.session_state.stage = "RUNNING"
+                st.rerun()
 
     # ---- running ----
     if st.session_state.stage=="RUNNING":
@@ -394,37 +483,12 @@ def main():
         p = st.session_state.profile
 
         # top card with personality hint
-        st.markdown(f'<div class="card"><h3>Risk Score: {p.score}% {risk_badge(p.level)}</h3>', unsafe_allow_html=True)
-        st.progress(float(p.score)/100.0)
-        st.markdown(f'<p class="subtle">Confidence: {p.confidence}% &nbsp; • &nbsp; '
-                    f'<small>🔍 <b>Tip:</b> I can over-call triggers; use your own judgement too.</small></p>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # triggers (always show, even if empty)
-        st.markdown('<div class="card"><h4>🎯 Detected Scam Triggers</h4>', unsafe_allow_html=True)
-        if p.triggers:
-            for k,v in p.triggers.items():
-                st.error(f"{k.replace('_',' ').title()}: {float(v):.1%}")
-        else:
-            st.info("No specific triggers fired — message looks clean on this axis.")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # other sections
-        sections = [
-            ("✅ Legitimacy Anchors", p.legitimacy_proof, "success"),
-            ("🔬 Claim Verifiability", p.claim_analysis, "info"),
-            ("⚠️ Coherence Issues", p.coherence_issues, "warning"),
-            ("💡 Recommended Actions", p.recos, None)
-        ]
-        for title, items, flag in sections:
-            if items:
-                st.markdown(f'<div class="card"><h4>{title}</h4>', unsafe_allow_html=True)
-                for x in items:
-                    if flag=="success": st.success(x)
-                    elif flag=="info": st.info(x)
-                    elif flag=="warning": st.warning(x)
-                    else: st.write(f"- {x}")
-                st.markdown('</div>', unsafe_allow_html=True)
+        draw_risk_score(p)
+        draw_triggers(p.triggers)
+        draw_section("Legitimacy Anchors", p.legitimacy_proof, "✅")
+        draw_section("Claim Verifiability", p.claim_analysis, "🔬")
+        draw_warning_section("Coherence Issues", p.coherence_issues, "⚠️")
+        draw_actions(p.recos, p.level)
 
         # reset
         if st.button("🔄 Analyze New Message", use_container_width=True):
