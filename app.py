@@ -323,7 +323,9 @@ def main():
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                         tmp.write(audio_bytes.read())
                         tmp.flush()
-                        result = model.transcribe(tmp.name,language=["en", "hi"],fp16=False)
+                        result = model.transcribe(tmp.name,fp16=False)
+                        if result["language"] not in {"en", "hi"}:
+                            result = model.transcribe(tmp.name, language="hi", fp16=False)
                     st.session_state["msg"] = result["text"].strip()
         msg = st.text_area("", value=st.session_state.get("msg", ""),
                            placeholder="🎙️ I’m listening…",
