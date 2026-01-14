@@ -298,7 +298,7 @@ def main():
 
     # ---------- unified text box ----------
     if st.session_state.get("mode"):          # SPEECH MODE
-        st.info("🎤 Press START, speak, then press STOP – text will appear automatically.")
+        st.info("👂 I’m listening. Press START and tell me.")
         audio_bytes = st.audio_input("Record", key="mic")
         if audio_bytes is not None:
             # run Whisper only once per new recording
