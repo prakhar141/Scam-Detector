@@ -229,7 +229,7 @@ THEME = {
 def local_css():
     st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400 ;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     .stApp {{background: {THEME["bg"]}; color: {THEME["text"]}; font-family: 'Inter', sans-serif;}}
     .card {{background: {THEME["card"]}; border-radius: 16px; padding: 24px; margin-bottom: 24px;
             box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #F5F0EB;}}
@@ -251,7 +251,6 @@ def init_state():
 def risk_badge(level:str) -> str:
     color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[level]
     return f'<span style="background:{color}22;color:{color};padding:6px 16px;border-radius:999px;font-weight:600;">{level}</span>'
-
 
 # ---------- page ----------
 def main():
@@ -298,7 +297,22 @@ def main():
 
     # ---------- unified text box ----------
     if st.session_state.get("mode"):          # SPEECH MODE
-        st.info("👂 I’m listening. Press START and tell me.")
+        st.markdown(
+    """
+    <div style="
+        background: linear-gradient(135deg,#fff8e1 0%,#ffecb3 100%);
+        border-left:5px solid #ff8f00;
+        border-radius:12px;
+        padding:14px 18px;
+        font-size:17px;
+        color:#3e2723;
+        box-shadow:0 2px 6px rgba(0,0,0,.07);
+    ">
+    👂 <b>I’m listening. </b> Press START and tell me.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
         audio_bytes = st.audio_input("Record", key="mic")
         if audio_bytes is not None:
             # run Whisper only once per new recording
@@ -405,7 +419,6 @@ def main():
         """,
         unsafe_allow_html=True
     )
-
 
 if __name__=="__main__": 
     main()
