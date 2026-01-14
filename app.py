@@ -252,15 +252,6 @@ def risk_badge(level:str) -> str:
     color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[level]
     return f'<span style="background:{color}22;color:{color};padding:6px 16px;border-radius:999px;font-weight:600;">{level}</span>'
 
-def load_whisper():
-    """Cache-loaded Whisper model"""
-    if "_whisper" not in st.session_state:
-        st.session_state._whisper = whisper.load_model("base")
-    return st.session_state._whisper
-
-def load_model():
-    """Dummy placeholder – replace with your real model loading"""
-    return None, None, None, None  # CoreOrchestrator will be unpacked from here
 
 # ---------- page ----------
 def main():
