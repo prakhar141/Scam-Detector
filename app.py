@@ -266,7 +266,19 @@ def main():
         <p class="subtle">AI that smells a rat — but sometimes barks at shadows 🤖</p>
         </div>
         """, unsafe_allow_html=True)
-
+    # ---------- language-capability hint ----------
+    hint = (
+        "🎙️ Speech  –  English only"
+        if st.session_state.mode else
+        "💬 Text  –  Hindi, English, Hinglish"
+    )
+    st.markdown(
+        f'<div style="text-align:center;margin-bottom:8px;">'
+        f'<span style="background:#FF8F0022;color:#FF8F00;'
+        f'padding:4px 12px;border-radius:999px;font-size:13px;'
+        f'font-weight:600;">{hint}</span></div>',
+        unsafe_allow_html=True
+    )
     # ---- input ----
     # ---------- UNIQUE TOGGLE ----------
     st.markdown("""
