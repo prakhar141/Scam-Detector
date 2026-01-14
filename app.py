@@ -345,7 +345,7 @@ def main():
                         tmp.flush()
                         tmp_path = tmp.name
                     try:
-                        result = model.transcribe(tmp_path, fp16=False
+                        result = model.transcribe(tmp_path, fp16=False)
                         text = result.get("text","").strip()
                         lang = result.get("language","")
                         # fallback only if text is too short or language unknown
