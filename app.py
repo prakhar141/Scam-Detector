@@ -256,7 +256,7 @@ THEME = {
 def local_css():
     st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400  ;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400   ;600;700&display=swap');
     .stApp {{background: {THEME["bg"]}; color: {THEME["text"]}; font-family: 'Inter', sans-serif;}}
     .card {{background: {THEME["card"]}; border-radius: 16px; padding: 24px; margin-bottom: 24px;
             box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #F5F0EB;}}
@@ -494,23 +494,40 @@ def main():
                         if lang not in {"en","hi"} and len(text)<6:
                             result = model.transcribe(tmp_path, language="hi", fp16=False)
                             text = result.get("text","").strip()
-                        if text and not st.session_state.msg:
-                            st.session_state.msg = text
-                            st.rerun()
+                        # ---- KEY FIX: assign to a *different* key, then rerun ----
+                        st.session_state["_whisper_text"] = text
+                        st.rerun()
                     finally:
                         # delete temp file
                         import os
                         if os.path.exists(tmp_path):
                             os.remove(tmp_path)
 
-    # single text_area for both modes
-    msg = st.text_area(
-        "",
-        key="msg",
-        placeholder="🎙️ I’m listening…" if mode else "💬 Paste it here – I’ll take a look.",
-        height=180,
-        label_visibility="collapsed"
-    )
+    # ---------- unified text box ----------
+    # Prefill only once per new Whisper result
+    if "_whisper_text" in st.session_state:
+        # pass the transcript as the *default* value on first render
+        msg = st.text_area(
+            "",
+            value=st.session_state.pop("_whisper_text"),   # pop → use once
+            key="msg",
+            placeholder="🎙️ I’m listening…" if mode else "💬 Paste it here – I’ll take a look.",
+            height=180,
+            label_visibility="collapsed"
+        )
+    else:
+        # normal run: pull current state (may be empty)
+        msg = st.text_area(
+            "",
+            value=st.session_state.get("msg", ""),
+            key="msg",
+            placeholder="🎙️ I’m listening…" if mode else "💬 Paste it here – I’ll take a look.",
+            height=180,
+            label_visibility="collapsed"
+        )
+
+    # single source of truth from here on
+    st.session_state.msg = msg
 
     # ---------- glowing analyse button ----------
     col1,col2,col3 = st.columns([1,2,1])
