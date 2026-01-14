@@ -271,10 +271,11 @@ def main():
     # ---- input ----
     col1, col2 = st.columns([1, 3])
     with col1:
-        mode = tog.st_toggle_switch(label="",
-                                    key="mode",
-                                    default_value=False,
-                                    label_after="🎤 Speak" if st.session_state.get("mode") else "⌨️ Type")
+        mode = st.toggle("🎤 Speak", value=False, key="mode")
+        st.caption("Type" if not mode else "Speak")
+                                    
+                                    
+                                
 
     # ---------- unified text box ----------
     if st.session_state.get("mode"):          # SPEECH MODE
