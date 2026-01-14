@@ -20,4 +20,4 @@ huggingface-hub>=0.19.0
 requests>=2.31.0
 #whisper
 openai-whisper
-streamlit-toggle-switch-pkg
+streamlit-toggle-switch   # ← CORRECT NAME (not "pkg")
