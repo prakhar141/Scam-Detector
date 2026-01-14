@@ -252,6 +252,11 @@ def risk_badge(level:str) -> str:
     color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[level]
     return f'<span style="background:{color}22;color:{color};padding:6px 16px;border-radius:999px;font-weight:600;">{level}</span>'
 
+# ---------- WHISPER loader ----------
+@st.cache_resource
+def load_whisper():
+    return whisper.load_model("tiny")
+
 # ---------- page ----------
 def main():
     st.set_page_config(page_title="BharatScam Guardian", page_icon="🛡️", layout="centered")
@@ -282,6 +287,7 @@ def main():
         f'font-weight:600;">{hint}</span></div>',
         unsafe_allow_html=True
     )
+
     # ---- input ----
     # ---------- UNIQUE TOGGLE ----------
     st.markdown("""
@@ -296,7 +302,6 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    
     # click detector
     if st.button(
         label=f"{'🎤'} Speak" if st.session_state.mode else f"{'⌨️'} Type",
@@ -328,18 +333,32 @@ def main():
 )
         audio_bytes = st.audio_input("Record", key="mic")
         if audio_bytes is not None:
+            audio_raw = audio_bytes.read()
+            audio_hash = hash(audio_raw)
             # run Whisper only once per new recording
-            if st.session_state.get("_last_audio_hash") != hash(audio_bytes):
-                st.session_state._last_audio_hash = hash(audio_bytes)
+            if st.session_state.get("_last_audio_hash") != audio_hash:
+                st.session_state._last_audio_hash = audio_hash
                 with st.spinner("🧠 Turning your voice into words…"):
                     model = load_whisper()
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                        tmp.write(audio_bytes.read())
+                        tmp.write(audio_raw)
                         tmp.flush()
-                        result = model.transcribe(tmp.name,fp16=False)
-                        if result["language"] not in {"en", "hi"}:
-                            result = model.transcribe(tmp.name, language="hi", fp16=False)
-                    st.session_state["msg"] = result["text"].strip()
+                        tmp_path = tmp.name
+                    try:
+                        result = model.transcribe(tmp_path, fp16=False)
+                        text = result.get("text","").strip()
+                        lang = result.get("language","")
+                        # fallback only if text is too short or language unknown
+                        if lang not in {"en","hi"} and len(text)<6:
+                            result = model.transcribe(tmp_path, language="hi", fp16=False)
+                            text = result.get("text","").strip()
+                        st.session_state["msg"] = text
+                    finally:
+                        # delete temp file
+                        import os
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+
         msg = st.text_area("", value=st.session_state.get("msg", ""),
                            placeholder="🎙️ I’m listening…",
                            height=180, label_visibility="collapsed")
@@ -437,3 +456,4 @@ def main():
 
 if __name__=="__main__": 
     main()
+
