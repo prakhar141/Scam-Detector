@@ -304,10 +304,6 @@ def risk_badge(level:str) -> str:
     color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[level]
     return f'<span style="background:{color}22;color:{color};padding:6px 16px;border-radius:999px;font-weight:600;">{level}</span>'
 
-# ---------- WHISPER loader ----------
-@st.cache_resource
-def load_whisper():
-    return whisper.load_model("tiny")
 
 # ---------- UNIQUE RESULT WIDGETS ----------
 def draw_risk_score(rp:RiskProfile):
