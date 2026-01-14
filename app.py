@@ -170,7 +170,7 @@ class CoreOrchestrator:
         ver_score, claim_details = self.claims.score_verifiability(claims_list)
         incoh_score, incoh_issues = self.coherence.score(text)
         
-        risk = scam_signals*(1-leg_score)**2*(1-ver_score)*(1+0.5*incoh_score)
+        risk = scam_signals * (1 - leg_score*0.5) * (1 - ver_score*0.3) * (1 + incoh_score*0.2)
         base_thresh = np.array([0.25,0.5,0.75])
         adaptive_thresh = base_thresh*(1-leg_score)*(1-0.5*ver_score)+0.2*incoh_score
         if risk<adaptive_thresh[0]: level="SAFE"
