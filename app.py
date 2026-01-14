@@ -211,19 +211,18 @@ import whisper
 import torch
 import pandas as pd
 import numpy as np
-import os
 
 # ---------- colour palette (clean Indian summer) ----------
 THEME = {
-    "bg": "#FDFBF8",
+    "bg": "#FDFBF8",               # warm paper-white
     "card": "#FFFFFF",
-    "accent": "#FF8F00",
-    "safe": "#2E7D32",
-    "caution": "#F57C00",
-    "suspicious": "#D32F2F",
-    "scam": "#B71C1C",
-    "text": "#3E2723",
-    "subtle": "#8D6E63"
+    "accent": "#FF8F00",           # saffron accent
+    "safe": "#2E7D32",             # Indian-flag green
+    "caution": "#F57C00",          # soft amber
+    "suspicious": "#D32F2F",       # brick red
+    "scam": "#B71C1C",             # deep maroon
+    "text": "#3E2723",             # espresso brown
+    "subtle": "#8D6E63"            # warm grey
 }
 
 # ---------- inject css ----------
@@ -264,6 +263,7 @@ def main():
     local_css()
     init_state()
 
+    # ---- hero ----
     st.markdown(f"""
         <div style="text-align:center;margin-top:-60px;margin-bottom:40px;">
         <h1 style="font-size:52px;background:-webkit-linear-gradient(45deg,{THEME["accent"]},#FF6F00);
@@ -271,16 +271,15 @@ def main():
         <p class="subtle">AI that smells a rat — but sometimes barks at shadows 🤖</p>
         </div>
         """, unsafe_allow_html=True)
-
     if "mode" not in st.session_state:
         st.session_state.mode = False
 
+    # ---------- language-capability hint ----------
     hint = (
         "🎙️ Speech  –  English"
         if st.session_state.mode else
         "💬 Text  –  Hindi, English, Hinglish"
     )
-
     st.markdown(
         f'<div style="text-align:center;margin-bottom:8px;">'
         f'<span style="background:#FF8F0022;color:#FF8F00;'
@@ -289,6 +288,21 @@ def main():
         unsafe_allow_html=True
     )
 
+    # ---- input ----
+    # ---------- UNIQUE TOGGLE ----------
+    st.markdown("""
+    <style>
+      .toggle-pill{
+        display:inline-flex;align-items:center;border-radius:999px;
+        padding:6px 14px;font-weight:600;cursor:pointer;
+        transition:all .3s ease;
+      }
+      .off{background:#e0e0e0;color:#333}
+      .on{background:#ff8f00;color:#fff}
+    </style>
+    """, unsafe_allow_html=True)
+
+    # click detector
     if st.button(
         label=f"{'🎤'} Speak" if st.session_state.mode else f"{'⌨️'} Type",
         key="pill_toggle",
@@ -297,58 +311,148 @@ def main():
         st.session_state.mode = not st.session_state.mode
         st.rerun()
 
-    if st.session_state.get("mode"):  # SPEECH MODE
+    mode = st.session_state.mode
+
+    # ---------- unified text box ----------
+    if st.session_state.get("mode"):          # SPEECH MODE
+        st.markdown(
+    """
+    <div style="
+        background: linear-gradient(135deg,#fff8e1 0%,#ffecb3 100%);
+        border-left:5px solid #ff8f00;
+        border-radius:12px;
+        padding:14px 18px;
+        font-size:17px;
+        color:#3e2723;
+        box-shadow:0 2px 6px rgba(0,0,0,.07);
+    ">
+    👂 <b>I’m listening. </b> Press START and tell me.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
         audio_bytes = st.audio_input("Record", key="mic")
         if audio_bytes is not None:
             audio_raw = audio_bytes.read()
             audio_hash = hash(audio_raw)
-
+            # run Whisper only once per new recording
             if st.session_state.get("_last_audio_hash") != audio_hash:
                 st.session_state._last_audio_hash = audio_hash
                 with st.spinner("🧠 Turning your voice into words…"):
                     model = load_whisper()
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                         tmp.write(audio_raw)
+                        tmp.flush()
                         tmp_path = tmp.name
-
                     try:
-                        audio = whisper.load_audio(tmp_path)
-                        lang_probs = model.detect_language(audio)[0]
-                        detected_lang = max(lang_probs, key=lang_probs.get)
-
-                        if detected_lang in {"hi","mr","bn","ta","te"}:
-                            result = model.transcribe(
-                                tmp_path,
-                                language="hi",
-                                task="transcribe",
-                                fp16=False
-                            )
-                        else:
-                            result = model.transcribe(
-                                tmp_path,
-                                task="transcribe",
-                                fp16=False
-                            )
-
-                        st.session_state["msg"] = result.get("text","").strip()
+                        result = model.transcribe(tmp_path, fp16=False
+                        text = result.get("text","").strip()
+                        lang = result.get("language","")
+                        # fallback only if text is too short or language unknown
+                        if lang not in {"en","hi"} and len(text)<6:
+                            result = model.transcribe(tmp_path, language="hi", fp16=False)
+                            text = result.get("text","").strip()
+                        st.session_state["msg"] = text
                     finally:
+                        # delete temp file
+                        import os
                         if os.path.exists(tmp_path):
                             os.remove(tmp_path)
 
         msg = st.text_area("", value=st.session_state.get("msg", ""),
                            placeholder="🎙️ I’m listening…",
                            height=180, label_visibility="collapsed")
-    else:
+    else:                                     # TYPE MODE
         msg = st.text_area("", value=st.session_state.get("msg", ""),
                            placeholder="💬 Paste it here — I’ll take a look.",
                            height=180, label_visibility="collapsed")
 
+    # keep single source of truth
     st.session_state.msg = msg
 
     if st.button("🛡️ Guard This Message", use_container_width=True) and msg.strip():
+        st.session_state.msg = msg
         st.session_state.stage = "RUNNING"
         st.rerun()
 
-if __name__=="__main__":
-    main()
+    # ---- running ----
+    if st.session_state.stage=="RUNNING":
+        with st.container():
+            st.markdown('<div class="card"><h4>🔍 Reading between the lines…</h4>', unsafe_allow_html=True)
+            bar = st.progress(0)
+            for i in range(100):
+                bar.progress(i+1)
+                time.sleep(0.005)
+            orch = CoreOrchestrator(*load_model()[2:])  # replace with your real orchestrator
+            st.session_state.profile = orch.infer(st.session_state.msg)
+            st.session_state.stage="DONE"
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.rerun()
 
+    # ---- results ----
+    if st.session_state.stage=="DONE" and st.session_state.profile:
+        p = st.session_state.profile
+
+        # top card with personality hint
+        st.markdown(f'<div class="card"><h3>Risk Score: {p.score}% {risk_badge(p.level)}</h3>', unsafe_allow_html=True)
+        st.progress(float(p.score)/100.0)
+        st.markdown(f'<p class="subtle">Confidence: {p.confidence}% &nbsp; • &nbsp; '
+                    f'<small>🔍 <b>Tip:</b> I can over-call triggers; use your own judgement too.</small></p>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # triggers (always show, even if empty)
+        st.markdown('<div class="card"><h4>🎯 Detected Scam Triggers</h4>', unsafe_allow_html=True)
+        if p.triggers:
+            for k,v in p.triggers.items():
+                st.error(f"{k.replace('_',' ').title()}: {float(v):.1%}")
+        else:
+            st.info("No specific triggers fired — message looks clean on this axis.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # other sections
+        sections = [
+            ("✅ Legitimacy Anchors", p.legitimacy_proof, "success"),
+            ("🔬 Claim Verifiability", p.claim_analysis, "info"),
+            ("⚠️ Coherence Issues", p.coherence_issues, "warning"),
+            ("💡 Recommended Actions", p.recos, None)
+        ]
+        for title, items, flag in sections:
+            if items:
+                st.markdown(f'<div class="card"><h4>{title}</h4>', unsafe_allow_html=True)
+                for x in items:
+                    if flag=="success": st.success(x)
+                    elif flag=="info": st.info(x)
+                    elif flag=="warning": st.warning(x)
+                    else: st.write(f"- {x}")
+                st.markdown('</div>', unsafe_allow_html=True)
+
+        # reset
+        if st.button("🔄 Analyze New Message", use_container_width=True):
+            st.session_state.update({"msg":None,"profile":None,"stage":None})
+            st.rerun()
+
+    # ---- persistent footer ----
+    st.markdown(
+        """
+        <div style="
+            text-align:center;
+            margin-top:40px;
+            padding:16px 0;
+            color:#8D6E63;
+            font-size:14px;
+        ">
+            Built with ❤️ by <b>Prakhar Mathur</b>. BITS Pilani<br/>
+            <span style="font-size:13px;">
+                Contact us: 
+                <a href="mailto:prakhar.mathur2020@gmail.com" 
+                   style="color:#FF8F00;text-decoration:none;font-weight:600;">
+                   Meet my devloper
+                </a>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+if __name__=="__main__": 
+    main()
