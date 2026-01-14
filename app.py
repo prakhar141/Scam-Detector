@@ -150,7 +150,7 @@ def load_model():
 @st.cache_resource
 def load_whisper():
     # tiny ≈ 75 MB, fastest for CPU Streamlit-cloud
-    return whisper.load_model("tiny")
+    return whisper.load_model("base")
 # >>> WHISPER END <<<
 
 # ============================================================
