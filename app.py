@@ -108,18 +108,18 @@ class VerifiableClaimsEngine:
         for c in claims:
             if c.type=="financial" and re.search(r'\d{6,}',c.text):
                 c.verifiability = 0.8; verified+=1
-                details.append(f"💰 '{c.text}' financial claim verifiable")
+                details.append(f"💰 '{c.text}' – financial claim verifiable")
             elif c.type=="temporal":
                 c.verifiability = 0.3
-                details.append(f"⏰ '{c.text}' temporal claim low verifiability")
+                details.append(f"⏰ '{c.text}' – temporal claim low verifiability")
             elif c.type=="identity":
                 c.verifiability = 0.7 if re.search(r'\b(?:RBI|NPCI|UIDAI|IT Department)\b',c.text) else 0.1
                 if c.verifiability>0.5: verified+=1
-                details.append(f"🏛️ '{c.text}' identity claim verifiability={c.verifiability}")
+                details.append(f"🏛️ '{c.text}' – identity claim verifiability={c.verifiability}")
             elif c.type=="action":
                 c.verifiability = 0.6 if any(w in c.text.lower() for w in ['app','portal','website','official']) else 0.0
                 if c.verifiability>0.5: verified+=1
-                details.append(f"✅ '{c.text}' action claim verifiability={c.verifiability}")
+                details.append(f"✅ '{c.text}' – action claim verifiability={c.verifiability}")
         return verified/len(claims) if claims else 0.0, details
 
 class SemanticCoherenceEngine:
@@ -150,7 +150,6 @@ def load_model():
 # >>> WHISPER START <<<
 @st.cache_resource
 def load_whisper():
-    # tiny ≈ 75 MB, fastest for CPU Streamlit-cloud
     return whisper.load_model("tiny")
 # >>> WHISPER END <<<
 
@@ -164,17 +163,48 @@ class CoreOrchestrator:
         self.claims = VerifiableClaimsEngine()
         self.coherence = SemanticCoherenceEngine()
     
+    # ------------- MESSAGE-SPECIFIC ACTIONS -------------
+    def _build_actions(self, rp:RiskProfile, leg_score:float, incoh_score:float) -> List[str]:
+        t = rp.triggers
+        actions = []
+        # high-risk
+        if rp.level=="SCAM" or rp.score>75:
+            actions.append("🚨 **Do NOT reply / click / pay** – highest risk")
+            actions.append("📞 Cross-check via official customer-care number printed on card/bank-statement")
+            actions.append("🗑️ Delete message & report as spam")
+            if "URGENCY" in t: actions.append("⏱️ Slow-down – scares are designed to rush you")
+            if "AUTHORITY" in t: actions.append("🏛️ Real RBI/Bank never threaten on WhatsApp/SMS")
+            return actions
+        # medium-risk
+        if rp.level=="SUSPICIOUS" or rp.score>50:
+            actions.append("⏳ Pause – do nothing for 10 minutes")
+            actions.append("🔍 Can you verify without replying? (official app / website)")
+            if "GREED" in t: actions.append("💸 If it looks too good to be true, it is")
+            if incoh_score>0.3: actions.append("🧠 Confusing language = red flag")
+            actions.append("📞 Call bank on printed number & ask")
+            return actions
+        # low-risk but some triggers
+        if rp.level=="CAUTION" and t:
+            actions.append("🟡 Double-check sender ID & spelling of links")
+            if "SOCIAL_PROOF" in t: actions.append("👥 Random testimonials may be fake")
+            actions.append("🔒 Keep UPI autopay limits low")
+            return actions
+        # safe
+        if leg_score>0.6:
+            actions.append("✅ Official anchors detected – likely safe")
+            actions.append("📲 Still, verify in your bank app before acting")
+            return actions
+        # default
+        return ["✅ Looks clean – always use common sense"]
+
     def infer(self,text:str) -> RiskProfile:
         tok, mdl, _, _ = load_model()
         text = text.strip()
-        if not text:
-            text="blank"
+        if not text: text="blank"
         inputs = tok(text,return_tensors="pt",truncation=True,padding=True).to(DEVICE)
         with torch.no_grad():
             logits = mdl(**inputs).logits/self.T
             probs  = torch.sigmoid(logits).cpu().numpy()[0]
-            
-        
         detected = probs>self.thres 
         scam_signals = probs[detected].mean() if detected.any() else probs.max()*0.25
         
@@ -193,12 +223,7 @@ class CoreOrchestrator:
         
         conf = (1-np.std(probs))*100
         triggers = {label:float(p) for label,p,det in zip(CP_AFT_LABELS,probs,detected) if det}
-        if leg_score>0.6:
-            recos = ["✅ Official trust anchors detected","📞 Verify on official portal","🔍 Check reference numbers"]
-        elif risk>0.5:
-            recos = ["🚨 DO NOT respond","📞 Call official numbers","🔒 Enable transaction limits","🗑️ Delete after reporting"]
-        else:
-            recos = ["⏳ Pause before acting","🤔 Can I verify without replying?"]
+        recos = self._build_actions(RiskProfile(0,level,0,triggers,[],[],[],[]), leg_score, incoh_score)
         
         return RiskProfile(round(float(risk*100),2),level,round(float(conf),2),
                            triggers,recos,leg_proof,claim_details,incoh_issues)
@@ -242,21 +267,6 @@ def local_css():
     h1,h2,h3 {{font-weight: 700; letter-spacing: -0.5px;}}
     .subtle {{color: {THEME["subtle"]}; font-size: 14px;}}
 
-    /* --- unique text-area --- */
-    .unique-textarea textarea {{
-        border-radius: 18px;
-        border: 2px dashed {THEME["accent"]}66;
-        background: #FFF9F0;
-        font-size: 17px;
-        padding: 20px;
-        transition: all .3s ease;
-    }}
-    .unique-textarea textarea:focus{{
-        border-style: solid;
-        border-color: {THEME["accent"]};
-        box-shadow: 0 0 0 3px {THEME["accent"]}33;
-    }}
-
     /* --- glowing button --- */
     @keyframes glow{{
         0%  {{box-shadow:0 0 6px {THEME["accent"]}99;}}
@@ -268,6 +278,18 @@ def local_css():
         font-size: 20px !important;
         height: 56px !important;
         border-radius: 14px !important;
+    }}
+
+    /* --- trigger fire cards --- */
+    @keyframes fire{{
+        0%  {{transform:scale(1);box-shadow:0 0 8px #ff8f0099;}}
+        50% {{transform:scale(1.02);box-shadow:0 0 20px #ff8f00ff;}}
+        100%{{transform:scale(1);box-shadow:0 0 8px #ff8f0099;}}
+    }}
+    .trigger-card{{
+        background:linear-gradient(135deg,#ff8f00 0%,#ff6f00 100%);
+        color:#fff;border-radius:16px;padding:14px 18px;margin-bottom:14px;
+        font-weight:600;font-size:18px;animation:fire 2s infinite;
     }}
     </style>
     """, unsafe_allow_html=True)
@@ -306,12 +328,50 @@ def draw_triggers(triggers:Dict[str,float]):
     if triggers:
         for k,v in triggers.items():
             st.markdown(f"""
-            <div style="background:#FF8F0011;border-left:5px solid #FF8F00;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
-                <b>{k.replace('_',' ').title()}</b>  <span style="float:right;color:#FF8F00;font-weight:700">{float(v):.0%}</span>
+            <div class="trigger-card">
+                <span style="font-size:20px;">{k.replace('_',' ').title()}</span>
+                <span style="float:right;background:rgba(255,255,255,.3);padding:4px 10px;border-radius:999px;">
+                    {float(v):.0%}
+                </span>
             </div>
             """, unsafe_allow_html=True)
     else:
         st.success("No triggers fired – message looks clean on this axis.")
+
+def draw_claim_cards(details:List[str]):
+    st.markdown('<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">🔬 Claim Verifiability</div>', unsafe_allow_html=True)
+    if not details:
+        st.info("No specific claims found.")
+        return
+    for d in details:
+        if "💰" in d:
+            st.markdown(f"""
+            <div style="background:#2E7D3211;border-left:5px solid #2E7D32;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
+                <span style="font-size:20px;">💰</span> <b>Financial</b><br/>
+                <span style="color:#2E7D32;font-weight:600;">High verifiability</span> – {d.split("–")[-1]}
+            </div>
+            """, unsafe_allow_html=True)
+        elif "⏰" in d:
+            st.markdown(f"""
+            <div style="background:#F57C0011;border-left:5px solid #F57C00;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
+                <span style="font-size:20px;">⏰</span> <b>Temporal</b><br/>
+                <span style="color:#F57C00;font-weight:600;">Low verifiability</span> – {d.split("–")[-1]}
+            </div>
+            """, unsafe_allow_html=True)
+        elif "🏛️" in d:
+            st.markdown(f"""
+            <div style="background:#1976D211;border-left:5px solid #1976D2;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
+                <span style="font-size:20px;">🏛️</span> <b>Identity</b><br/>
+                <span style="color:#1976D2;font-weight:600;">Medium verifiability</span> – {d.split("–")[-1]}
+            </div>
+            """, unsafe_allow_html=True)
+        elif "✅" in d:
+            st.markdown(f"""
+            <div style="background:#388E3C11;border-left:5px solid #388E3C;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
+                <span style="font-size:20px;">✅</span> <b>Action</b><br/>
+                <span style="color:#388E3C;font-weight:600;">Verifiable</span> – {d.split("–")[-1]}
+            </div>
+            """, unsafe_allow_html=True)
 
 def draw_section(title:str, items:List[str], icon:str):
     if not items: return
@@ -333,7 +393,7 @@ def draw_warning_section(title:str, items:List[str], icon:str):
         </div>
         """, unsafe_allow_html=True)
 
-def draw_actions(recos:List[str], level:str):
+def draw_actions(recos:List[str]):
     st.markdown('<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">💡 Recommended Actions</div>', unsafe_allow_html=True)
     for r in recos:
         st.markdown(f"""
@@ -450,7 +510,7 @@ def main():
                            height=180, label_visibility="collapsed", key="ta1")
     else:                                     # TYPE MODE
         msg = st.text_area("", value=st.session_state.get("msg", ""),
-                           placeholder="💬 Paste it here — I’ll take a look.",
+                           placeholder="💬 Paste it here – I’ll take a look.",
                            height=180, label_visibility="collapsed", key="ta2")
 
     # keep single source of truth
@@ -459,7 +519,7 @@ def main():
     # ---------- glowing analyse button ----------
     col1,col2,col3 = st.columns([1,2,1])
     with col2:
-        if st.button("🛡️ Guard This Message", use_container_width=True, key="ana", help=None):
+        if st.button("🛡️ Guard This Message", use_container_width=True, key="ana"):
             if msg.strip():
                 st.session_state.stage = "RUNNING"
                 st.rerun()
@@ -485,10 +545,10 @@ def main():
         # top card with personality hint
         draw_risk_score(p)
         draw_triggers(p.triggers)
+        draw_claim_cards(p.claim_analysis)
         draw_section("Legitimacy Anchors", p.legitimacy_proof, "✅")
-        draw_section("Claim Verifiability", p.claim_analysis, "🔬")
         draw_warning_section("Coherence Issues", p.coherence_issues, "⚠️")
-        draw_actions(p.recos, p.level)
+        draw_actions(p.recos)
 
         # reset
         if st.button("🔄 Analyze New Message", use_container_width=True):
