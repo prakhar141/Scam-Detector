@@ -165,6 +165,9 @@ class CoreOrchestrator:
     
     def infer(self,text:str) -> RiskProfile:
         tok, mdl, _, _ = load_model()
+        text = text.strip()
+        if not text:
+            text="blank"
         inputs = tok(text,return_tensors="pt",truncation=True,padding=True).to(DEVICE)
         with torch.no_grad():
             logits = mdl(**inputs).logits/self.T
