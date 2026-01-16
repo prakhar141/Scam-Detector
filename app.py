@@ -19,7 +19,7 @@ import streamlit_toggle as tog   # pip install streamlit-toggle-switch-pkg
 # GLOBAL CONFIG
 # ============================================================
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-REPO_ID = "prakhar146/scam-detection"
+REPO_ID = "prakhar146/scam"
 LOCAL_DIR = Path("./hf_cpaft_core")
 LOCAL_DIR.mkdir(exist_ok=True)
 
