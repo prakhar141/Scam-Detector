@@ -19,7 +19,7 @@ import streamlit_toggle as tog   # pip install streamlit-toggle-switch-pkg
 # GLOBAL CONFIG
 # ============================================================
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-REPO_ID = "prakhar146/scam"
+REPO_ID = "prakhar146/scam-detection"
 LOCAL_DIR = Path("./hf_cpaft_core")
 LOCAL_DIR.mkdir(exist_ok=True)
 
@@ -141,39 +141,17 @@ class SemanticCoherenceEngine:
 # ============================================================
 @st.cache_resource
 def load_model():
-    # --- download artifacts ---
-    for f in ["config.json", "model.safetensors", "tokenizer.json", "scam_v1.json"]:
-        hf_hub_download(
-            REPO_ID,
-            f,
-            local_dir=LOCAL_DIR,
-            repo_type="dataset"
-        )
-
-    # --- load model & tokenizer ---
+    for f in ["config.json","model.safetensors","tokenizer.json","scam_v1.json"]:
+        hf_hub_download(REPO_ID,f,local_dir=LOCAL_DIR,repo_type="dataset")
     tok = AutoTokenizer.from_pretrained(LOCAL_DIR)
-    mdl = (
-        AutoModelForSequenceClassification
-        .from_pretrained(LOCAL_DIR)
-        .to(DEVICE)
-        .eval()
-    )
-
-    # --- load calibration safely ---
-    with open(LOCAL_DIR / "scam_v1.json") as f:
-        cal = json.load(f)
-
-    # temperature may not exist in older calibration files
-    temperature = float(cal.get("temperature", 1.0))
-
-    # thresholds must exist; fallback keeps system alive if missing
-    thresholds = np.array(
-        cal.get("thresholds", [0.5] * len(CP_AFT_LABELS)),
-        dtype=np.float32
-    )
-
-    return tok, mdl, temperature, thresholds
-
+    mdl = AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR).to(DEVICE).eval()
+    with open(LOCAL_DIR/"scam_v1.json") as f: cal=json.load(f)
+    return tok, mdl, float(cal["temperature"]), np.array(cal["thresholds"])
+# >>> WHISPER START <<<
+@st.cache_resource
+def load_whisper():
+    return whisper.load_model("tiny")
+# >>> WHISPER END <<<
 # ============================================================
 # CORE ORCHESTRATOR
 # ============================================================
