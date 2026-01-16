@@ -4,16 +4,15 @@
 import streamlit as st
 import torch, torch.nn.functional as F
 import numpy as np
-import re, time, json
+import re, time, json, hashlib
 from pathlib import Path
 from dataclasses import dataclass
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Set
+from collections import defaultdict, Counter
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from huggingface_hub import hf_hub_download
-# >>> WHISPER START <<<
 import whisper, tempfile, io
-import streamlit_toggle as tog   # pip install streamlit-toggle-switch-pkg
-# >>> WHISPER END <<<
+from datetime import datetime
 
 # ============================================================
 # GLOBAL CONFIG
@@ -23,118 +22,237 @@ REPO_ID = "prakhar146/scam-detection"
 LOCAL_DIR = Path("./hf_cpaft_core")
 LOCAL_DIR.mkdir(exist_ok=True)
 
-COLORS = {
-    "SAFE": "#2D936C",
-    "CAUTION": "#F4A261",
-    "SUSPICIOUS": "#E76F51",
-    "SCAM": "#C1121C"
-}
-
-# NEW (must match Cell-6/8 exactly)
-CP_AFT_LABELS = ["AUTHORITY","URGENCY","FEAR","GREED",
-                 "SOCIAL_PROOF","SCARCITY","OBEDIENCE","TRUST"]
-LEGITIMATE_PATTERNS = {
-    "bank_official": r'\b(?:HDFC|ICICI|SBI|AXIS|KOTAK|BOB|PNB)[\s]*(?:Bank|Ltd|Limited)\b|\bRBI\b|\bNPCI\b|\bIRDAI\b',
-    "govt_official": r'\b(?:UIDAI|ITA|GST|EPFO|CBDT|MCA|CEIR)\b|\b(?:gov\.in|nic\.in|ac\.in)\b',
-    "verifiable_ref": r'\b(?:UTR|Ref|Reference|Txn|Transaction)[\s]*[No|ID|Number]*[:#]?\s*[A-Z0-9]{8,20}\b',
-    "official_contact": r'\b(?:1800|1860)[\s]*-?\d{3}[\s]*-?\d{4}\b|\b(?:91|0)?\s*\d{8}\b',
-    "secure_url": r'\bhttps?://(?:www\.)?(?:hdfcbank\.com|icicibank\.com|sbi\.co\.in|axisbank\.com|paytm\.com|amazon\.in|flipkart\.com)[/\w.-]*\b'
-}
-
-SCAM_PATTERNS = {
-    "urgency_vague": r'\b(immediately|now|urgent|within\s+\d+\s+hours?)\b(?!.*\b(fraud|unauthorized)\b)',
-    "authority_impersonation": r'\b(?:fake|fraud|spoof|impersonat).*(?:RBI|Bank|Govt|Police|CIBIL|IT Dept)\b',
-    "unverifiable_sender": r'\b(?:Dear Customer|Valued User|Respected Sir/Madam)\b',
-    "payment_redirection": r'\b(?:pay|transfer|send).*?(?:UPI|Wallet|Account).*?(?:new|alternate|other)\b'
+# Theme colors (same as original)
+THEME = {
+    "bg": "#FDFBF8", "card": "#FFFFFF", "accent": "#FF8F00",
+    "safe": "#2E7D32", "caution": "#F57C00", "suspicious": "#D32F2F", "scam": "#B71C1C",
+    "text": "#3E2723", "subtle": "#8D6E63"
 }
 
 # ============================================================
-# DATACLASSES
+# ANTI-GAMING & CREDIBILITY ENGINE
 # ============================================================
-@dataclass
-class Claim:
-    text: str
-    type: str  # financial, temporal, identity, action
-    verifiability: float = 0.0
-
-@dataclass
-class RiskProfile:
-    score: float
-    level: str
-    confidence: float
-    triggers: Dict[str,float]
-    recos: List[str]
-    legitimacy_proof: List[str]
-    claim_analysis: List[str]
-    coherence_issues: List[str]
+class AntiGamingEngine:
+    """Detects if user is testing the system with nonsense/gaming attempts"""
+    
+    def __init__(self):
+        self.test_patterns = [
+            r'^(test|asdf|qwerty|hello|hi|random|blah|foo|bar|spam|scam|message|abc|xyz|123)',
+            r'(.)\1{4,}',  # repeated characters
+            r'\b(lorem ipsum|dummy text|sample message)\b',
+            r'^[a-z]{1,3}$',  # too short
+        ]
+        self.suspicious_senders = set()
+        self.message_timestamps = []
+        
+    def check_gaming(self, text: str) -> Tuple[bool, str, float]:
+        """
+        Returns: (is_gaming, reason, penalty_score)
+        """
+        text_lower = text.lower().strip()
+        
+        # Check for gibberish
+        if len(text) < 10:
+            return True, "Message too short to analyze meaningfully", 0.9
+        
+        # Check test patterns
+        for pattern in self.test_patterns:
+            if re.search(pattern, text_lower, re.I):
+                return True, "Detected as test/gaming attempt", 0.85
+        
+        # Check randomness (too many unique characters vs length)
+        char_ratio = len(set(text_lower)) / len(text_lower) if text_lower else 1
+        if char_ratio > 0.8 and len(text) < 50:
+            return True, "Appears to be random characters", 0.75
+        
+        # Check for repeated submission patterns (same message hash)
+        msg_hash = hashlib.md5(text_lower.encode()).hexdigest()
+        if "message_history" not in st.session_state:
+            st.session_state.message_history = set()
+        
+        if msg_hash in st.session_state.message_history:
+            return True, "Repeated message detected", 0.6
+        
+        st.session_state.message_history.add(msg_hash)
+        
+        # Check submission frequency
+        now = datetime.now()
+        if "submission_times" not in st.session_state:
+            st.session_state.submission_times = []
+        
+        st.session_state.submission_times = [t for t in st.session_state.submission_times 
+                                           if (now - t).total_seconds() < 300]  # 5 minutes
+        st.session_state.submission_times.append(now)
+        
+        if len(st.session_state.submission_times) > 5:
+            return True, "Too many submissions in short time", 0.5
+        
+        return False, "", 0.0
 
 # ============================================================
-# ENGINES
+# ENHANCED PATTERN DETECTION
 # ============================================================
 class TrustAnchorEngine:
-    """Score messages based on official trust anchors"""
-    def score(self, text: str) -> Tuple[float, List[str]]:
+    """Score messages based on official trust anchors with sophistication detection"""
+    
+    def __init__(self):
+        self.legitimate_patterns = {
+            "bank_official": (r'\b(?:HDFC|ICICI|SBI|AXIS|KOTAK|BOB|PNB)[\s]*(?:Bank|Ltd|Limited)\b|\bRBI\b|\bNPCI\b|\bIRDAI\b', 0.35),
+            "govt_official": (r'\b(?:UIDAI|ITA|GST|EPFO|CBDT|MCA|CEIR)\b|\b(?:gov\.in|nic\.in|ac\.in)\b', 0.35),
+            "verifiable_ref": (r'\b(?:UTR|Ref|Reference|Txn|Transaction)[\s]*[No|ID|Number]*[:#]?\s*[A-Z0-9]{8,20}\b', 0.3),
+            "official_contact": (r'\b(?:1800|1860)[\s]*-?\d{3}[\s]*-?\d{4}\b|\b(?:91|0)?\s*\d{8}\b', 0.25),
+            "secure_url": (r'\bhttps?://(?:www\.)?(?:hdfcbank\.com|icicibank\.com|sbi\.co\.in|axisbank\.com|paytm\.com|amazon\.in|flipkart\.com)[/\w.-]*\b', 0.35),
+            "official_email": (r'\b[A-Za-z0-9._%+-]+@(?:hdfcbank\.com|icicibank\.com|sbi\.co\.in|axisbank\.com|rbi\.org\.in)\b', 0.4)
+        }
+    
+    def score(self, text: str) -> Tuple[float, List[str], Dict[str, List[str]]]:
         score, hits = 0.0, []
-        for name, pat in LEGITIMATE_PATTERNS.items():
+        detailed_matches = defaultdict(list)
+        
+        for name, (pat, weight) in self.legitimate_patterns.items():
             matches = re.findall(pat, text, re.I)
             if matches:
-                hits.append(f"✓ {name.replace('_',' ').title()}: {len(matches)}")
-                weights = {
-                    "bank_official": 0.35,
-                    "govt_official": 0.35,
-                    "verifiable_ref": 0.3,
-                    "official_contact": 0.25,
-                    "secure_url": 0.35
-                }
-                score += min(len(matches) * weights.get(name,0.2), weights.get(name,0.2))
-        return min(score, 1.0), hits
+                unique_matches = set(matches)
+                detailed_matches[name].extend(unique_matches)
+                hits.append(f"{name.replace('_',' ').title()}: {len(unique_matches)} found")
+                score += min(len(unique_matches) * weight, weight)
+        
+        return min(score, 1.0), hits, dict(detailed_matches)
 
 class VerifiableClaimsEngine:
-    """Decompose text into verifiable claims"""
-    def extract_claims(self, text:str) -> List[Claim]:
+    """Decompose text into claims with verifiability scoring"""
+    
+    def extract_claims(self, text: str) -> List[Tuple[str, str, float, str]]:
         claims = []
-        for m in re.findall(r'\b(?:₹|Rs\.?|INR)\s*[\d,]+|\b\d{6,}\b', text):
-            claims.append(Claim(m,"financial"))
-        for m in re.findall(r'\b(?:today|tomorrow|yesterday|within\s+\d+\s+(?:hour|day|week)s?)\b', text):
-            claims.append(Claim(m,"temporal"))
-        for m in re.findall(r'\b(?:RBI|NPCI|UIDAI|IT Department|HDFC|ICICI|SBI|AXIS|KOTAK|Government|Police|CIBIL)\b', text):
-            claims.append(Claim(m,"identity"))
-        for m in re.findall(r'\b(?:click|pay|transfer|send|share|update|verify)\s+(?:link|amount|money|details|OTP|UPI|account)\b', text):
-            claims.append(Claim(m,"action"))
+        
+        # Financial claims
+        for m in re.finditer(r'\b(?:₹|Rs\.?|INR)\s*[\d,]+(?:\.\d{2})?|\b\d{6,}\b', text):
+            amount = m.group()
+            context = text[max(0, m.start()-50):min(len(text), m.end()+50)]
+            claims.append((amount, "financial", 0.8, context))
+        
+        # Temporal claims
+        for m in re.finditer(r'\b(?:immediately|now|within\s+\d+\s+(?:hour|day|min)s?|today|tomorrow|yesterday|asap|urgent)\b', text, re.I):
+            urgency = m.group()
+            context = text[max(0, m.start()-50):min(len(text), m.end()+50)]
+            claims.append((urgency, "temporal", 0.3, context))
+        
+        # Identity claims
+        for m in re.finditer(r'\b(?:RBI|NPCI|UIDAI|IT Department|HDFC Bank|ICICI Bank|SBI|AXIS Bank|Government|Police|CIBIL|TRAI|DOT)\b', text):
+            entity = m.group()
+            context = text[max(0, m.start()-50):min(len(text), m.end()+50)]
+            verifiability = 0.8 if entity in ["RBI", "NPCI", "UIDAI", "IT Department"] else 0.4
+            claims.append((entity, "identity", verifiability, context))
+        
+        # Action claims
+        for m in re.finditer(r'\b(?:click|pay|transfer|send|share|update|verify|download|install)\s+(?:here|link|amount|money|details|OTP|UPI|account|app|apk)\b', text, re.I):
+            action = m.group()
+            context = text[max(0, m.start()-50):min(len(text), m.end()+50)]
+            verifiability = 0.7 if any(w in context.lower() for w in ['official', 'bank', 'portal']) else 0.2
+            claims.append((action, "action", verifiability, context))
+        
         return claims
-
-    def score_verifiability(self, claims:List[Claim]) -> Tuple[float, List[str]]:
-        details, verified = [], 0
-        for c in claims:
-            if c.type=="financial" and re.search(r'\d{6,}',c.text):
-                c.verifiability = 0.8; verified+=1
-                details.append(f"💰 '{c.text}' – financial claim verifiable")
-            elif c.type=="temporal":
-                c.verifiability = 0.3
-                details.append(f"⏰ '{c.text}' – temporal claim low verifiability")
-            elif c.type=="identity":
-                c.verifiability = 0.7 if re.search(r'\b(?:RBI|NPCI|UIDAI|IT Department)\b',c.text) else 0.1
-                if c.verifiability>0.5: verified+=1
-                details.append(f"🏛️ '{c.text}' – identity claim verifiability={c.verifiability}")
-            elif c.type=="action":
-                c.verifiability = 0.6 if any(w in c.text.lower() for w in ['app','portal','website','official']) else 0.0
-                if c.verifiability>0.5: verified+=1
-                details.append(f"✅ '{c.text}' – action claim verifiability={c.verifiability}")
-        return verified/len(claims) if claims else 0.0, details
+    
+    def score_verifiability(self, claims: List[Tuple[str, str, float, str]]) -> Tuple[float, List[Dict], float]:
+        if not claims:
+            return 0.0, [], 0.0
+        
+        total_score = sum(c[2] for c in claims)
+        avg_score = total_score / len(claims)
+        
+        high_verif = [c for c in claims if c[2] >= 0.7]
+        low_verif = [c for c in claims if c[2] < 0.4]
+        
+        details = []
+        for claim, ctype, score, context in claims:
+            details.append({
+                "claim": claim,
+                "type": ctype,
+                "score": score,
+                "context": context[:100] + "..." if len(context) > 100 else context,
+                "verifiable": score >= 0.6
+            })
+        
+        # Red flag ratio - too many unverifiable claims
+        red_flag_ratio = len(low_verif) / len(claims) if claims else 0
+        
+        return avg_score, details, red_flag_ratio
 
 class SemanticCoherenceEngine:
-    """Detects confusion tactics"""
-    def score(self,text:str) -> Tuple[float,List[str]]:
-        score, issues = 0.0, []
-        urgencies = set(re.findall(r'\b(immediately|now|within\s+\d+|asap|by\s+\d+)\b',text))
-        if len(urgencies)>2: score+=0.3; issues.append(f"🕒 Conflicting urgencies: {urgencies}")
-        auths = re.findall(r'\b(RBI|Government|Police|Bank|IT Dept|Court)\b',text)
-        if len(auths)>=3: score+=0.25; issues.append(f"🏛️ Multiple authorities: {auths}")
-        if any(len(s.split())>25 for s in re.split(r'[.!?]',text)): score+=0.15; issues.append("📜 Long/confusing sentences")
-        emotion = len(re.findall(r'\b(urgent|immediately|freeze|arrest|cancel|terminate)\b',text))
-        factual = len(re.findall(r'\b(reference|transaction|account|number|date|time)\b',text)) or 1
-        if emotion>factual*2: score+=0.3; issues.append(f"😱 Emotion vs facts imbalance: {emotion}/{factual}")
-        return min(score,1.0), issues
+    """Detects confusion tactics and emotional manipulation"""
+    
+    def score(self, text: str) -> Tuple[float, List[str], Dict[str, float]]:
+        issues = []
+        sub_scores = {"urgency": 0.0, "authority": 0.0, "emotion": 0.0, "complexity": 0.0}
+        
+        # Urgency analysis
+        urgency_words = re.findall(r'\b(immediately|now|within\s+\d+|asap|by\s+\d+|urgent|hurry|act\s+fast)\b', text, re.I)
+        if len(urgency_words) > 2:
+            sub_scores["urgency"] = min(len(urgency_words) * 0.15, 0.4)
+            issues.append(f"⏰ Repeated urgency: {set(urgency_words)}")
+        
+        # Authority mixing
+        authorities = re.findall(r'\b(RBI|Government|Police|Bank|IT Dept|CIBIL|Court|Supreme Court|ED|CBI)\b', text)
+        if len(set(authorities)) >= 3:
+            sub_scores["authority"] = 0.3
+            issues.append(f"🏛️ Conflicting authorities: {set(authorities)}")
+        
+        # Sentence complexity (confusion tactic)
+        sentences = re.split(r'[.!?]', text)
+        long_sentences = [s for s in sentences if len(s.split()) > 25]
+        if len(long_sentences) > 0:
+            sub_scores["complexity"] = min(len(long_sentences) * 0.1, 0.2)
+            issues.append(f"📜 {len(long_sentences)} confusingly long sentences")
+        
+        # Emotion vs facts imbalance
+        emotion_words = re.findall(r'\b(urgent|immediately|freeze|arrest|cancel|terminate|suspend|block|deactivate|fraud|illegal)\b', text, re.I)
+        factual_words = re.findall(r'\b(reference|transaction|account|number|date|time|amount|ID|UTR)\b', text, re.I)
+        
+        emotion_score = len(emotion_words)
+        factual_score = max(len(factual_words), 1)
+        
+        if emotion_score > factual_score * 2:
+            sub_scores["emotion"] = min((emotion_score / factual_score) * 0.15, 0.35)
+            issues.append(f"😱 Emotion manipulation: {emotion_score} emotional vs {factual_score} factual words")
+        
+        total_score = sum(sub_scores.values())
+        return min(total_score, 1.0), issues, sub_scores
+
+class TriggerSynergyAnalyzer:
+    """Analyzes how triggers work together to create scam narratives"""
+    
+    def __init__(self):
+        self.cp_aft_labels = ["AUTHORITY","URGENCY","FEAR","GREED","SOCIAL_PROOF","SCARCITY","OBEDIENCE","TRUST"]
+        self.synergy_patterns = {
+            "impersonation_rbi": {"triggers": ["AUTHORITY", "URGENCY", "FEAR"], "threshold": 0.6, "narrative": "Classic RBI/Bank impersonation: Pretends to be authority, creates urgency, threatens consequences"},
+            "lottery_scam": {"triggers": ["GREED", "SOCIAL_PROOF", "SCARCITY"], "threshold": 0.5, "narrative": "Lottery/prize scam: Promises huge money, shows fake winners, creates scarcity"},
+            "digital_arrest": {"triggers": ["AUTHORITY", "FEAR", "URGENCY", "OBEDIENCE"], "threshold": 0.7, "narrative": "Digital arrest scam: Impersonates police/RBI, threatens arrest, demands immediate compliance"},
+            "fake_investment": {"triggers": ["GREED", "TRUST", "SOCIAL_PROOF"], "threshold": 0.6, "narrative": "Fake investment: Promises high returns, shows fake testimonials, builds trust"},
+            "urgent_kyc": {"triggers": ["AUTHORITY", "URGENCY", "TRUST"], "threshold": 0.5, "narrative": "Urgent KYC scam: Claims to be bank, threatens account suspension, asks for details"},
+        }
+    
+    def analyze_synergies(self, triggers: Dict[str, float], text: str) -> List[Dict[str, any]]:
+        """
+        Returns list of detected scam patterns with narratives
+        """
+        detected_patterns = []
+        
+        for pattern_name, config in self.synergy_patterns.items():
+            required_triggers = config["triggers"]
+            trigger_scores = [triggers.get(t, 0) for t in required_triggers]
+            
+            if all(score > 0.3 for score in trigger_scores):  # All triggers present
+                avg_score = sum(trigger_scores) / len(trigger_scores)
+                if avg_score >= config["threshold"]:
+                    detected_patterns.append({
+                        "name": pattern_name.replace("_", " ").title(),
+                        "score": round(avg_score, 2),
+                        "narrative": config["narrative"],
+                        "primary_triggers": required_triggers,
+                        "severity": "HIGH" if avg_score > 0.7 else "MEDIUM"
+                    })
+        
+        return detected_patterns
 
 # ============================================================
 # MODEL LOADER
@@ -147,14 +265,13 @@ def load_model():
     mdl = AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR).to(DEVICE).eval()
     with open(LOCAL_DIR/"scam_v1.json") as f: cal=json.load(f)
     return tok, mdl, float(cal["temperature"]), np.array(cal["thresholds"])
-# >>> WHISPER START <<<
+
 @st.cache_resource
 def load_whisper():
     return whisper.load_model("tiny")
-# >>> WHISPER END <<<
 
 # ============================================================
-# CORE ORCHESTRATOR
+# ENHANCED CORE ORCHESTRATOR
 # ============================================================
 class CoreOrchestrator:
     def __init__(self,T,thres):
@@ -162,101 +279,392 @@ class CoreOrchestrator:
         self.trust = TrustAnchorEngine()
         self.claims = VerifiableClaimsEngine()
         self.coherence = SemanticCoherenceEngine()
+        self.synergy = TriggerSynergyAnalyzer()
+        self.antigaming = AntiGamingEngine()
     
-    # ------------- MESSAGE-SPECIFIC ACTIONS -------------
-    def _build_actions(self, rp:RiskProfile, leg_score:float, incoh_score:float) -> List[str]:
-        t = rp.triggers
+    def calculate_risk_score(self, probs: np.ndarray, leg_score: float, 
+                           ver_score: float, incoh_score: float, 
+                           red_flag_ratio: float, gaming_penalty: float) -> float:
+        """
+        Multi-dimensional risk calculation specific to Indian scams
+        """
+        # Base scam signal from model
+        detected = probs > self.thres
+        scam_signals = probs[detected].mean() if detected.any() else probs.max() * 0.25
+        
+        # Penalize heavily if gaming detected
+        if gaming_penalty > 0:
+            return min(scam_signals * (1 + gaming_penalty), 1.0)
+        
+        # Legitimacy anchors provide strong protection
+        legitimacy_factor = (1 - leg_score) ** 1.5  # Non-linear penalty
+        
+        # Verifiability is critical - low verifiability = high risk
+        verifiability_factor = (1 - ver_score) ** 1.2
+        
+        # Coherence issues amplify risk
+        coherence_factor = 1 + (incoh_score * 0.6)
+        
+        # Red flag ratio (many unverifiable claims)
+        red_flag_factor = 1 + (red_flag_ratio * 0.8)
+        
+        # Weight triggers based on Indian scam prevalence
+        trigger_weights = {
+            "AUTHORITY": 1.3, "URGENCY": 1.2, "FEAR": 1.4, "GREED": 1.1,
+            "SOCIAL_PROOF": 0.9, "SCARCITY": 1.0, "OBEDIENCE": 1.3, "TRUST": 1.2
+        }
+        
+        weighted_triggers = sum(probs[i] * trigger_weights.get(label, 1.0) 
+                               for i, label in enumerate(self.synergy.cp_aft_labels))
+        
+        # Combine all factors
+        risk = (scam_signals * weighted_triggers * 
+                legitimacy_factor * verifiability_factor * 
+                coherence_factor * red_flag_factor)
+        
+        # Adaptive thresholding based on context
+        base_risk = scam_signals * 0.7  # Base model confidence
+        contextual_risk = risk * 0.3    # Contextual factors
+        
+        return min(base_risk + contextual_risk, 1.0)
+    
+    def generate_narrative(self, text: str, triggers: Dict[str, float], 
+                          synergy_patterns: List[Dict], leg_matches: Dict[str, List[str]],
+                          coherence_issues: List[str]) -> str:
+        """
+        Generate human-readable explanation of why message is risky
+        """
+        if not triggers:
+            return "This message appears legitimate. No scam patterns detected."
+        
+        story_parts = []
+        
+        # Start with dominant pattern if found
+        if synergy_patterns:
+            dominant = max(synergy_patterns, key=lambda x: x["score"])
+            story_parts.append(f"**Primary Pattern:** {dominant['narrative']}")
+        else:
+            # Fallback to individual triggers
+            top_triggers = sorted(triggers.items(), key=lambda x: x[1], reverse=True)[:2]
+            story_parts.append(f"**Key Concerns:** High {top_triggers[0][0].replace('_', ' ').lower()} ({top_triggers[0][1]:.0%})")
+            if len(top_triggers) > 1:
+                story_parts.append(f"and {top_triggers[1][0].replace('_', ' ').lower()} ({top_triggers[1][1]:.0%}) signals")
+        
+        # Add legitimacy context
+        if leg_matches:
+            story_parts.append(f"\n**Legitimacy Check:** Found {len(leg_matches)} official references, but context matters.")
+        else:
+            story_parts.append(f"\n**Legitimacy Check:** No official bank/government identifiers found - be cautious.")
+        
+        # Add coherence issues
+        if coherence_issues:
+            story_parts.append(f"\n**Language Analysis:** {len(coherence_issues)} manipulation tactics detected.")
+        
+        return " ".join(story_parts)
+    
+    def build_specific_actions(self, synergy_patterns: List[Dict], triggers: Dict[str, float],
+                              leg_score: float, incoh_score: float, text: str) -> List[str]:
+        """
+        Build message-specific actions based on detected patterns
+        """
         actions = []
-        # high-risk
-        if rp.level=="SCAM" or rp.score>75:
-            actions.append("🚨 **Do NOT reply / click / pay** – highest risk")
-            actions.append("📞 Cross-check via official customer-care number printed on card/bank-statement")
-            actions.append("🗑️ Delete message & report as spam")
-            if "URGENCY" in t: actions.append("⏱️ Slow-down – scares are designed to rush you")
-            if "AUTHORITY" in t: actions.append("🏛️ Real RBI/Bank never threaten on WhatsApp/SMS")
-            return actions
-        # medium-risk
-        if rp.level=="SUSPICIOUS" or rp.score>50:
-            actions.append("⏳ Pause – do nothing for 10 minutes")
-            actions.append("🔍 Can you verify without replying? (official app / website)")
-            if "GREED" in t: actions.append("💸 If it looks too good to be true, it is")
-            if incoh_score>0.3: actions.append("🧠 Confusing language = red flag")
-            actions.append("📞 Call bank on printed number & ask")
-            return actions
-        # low-risk but some triggers
-        if rp.level=="CAUTION" and t:
-            actions.append("🟡 Double-check sender ID & spelling of links")
-            if "SOCIAL_PROOF" in t: actions.append("👥 Random testimonials may be fake")
-            actions.append("🔒 Keep UPI autopay limits low")
-            return actions
-        # safe
-        if leg_score>0.6:
-            actions.append("✅ Official anchors detected – likely safe")
-            actions.append("📲 Still, verify in your bank app before acting")
-            return actions
-        # default
-        return ["✅ Looks clean – always use common sense"]
-
-    def infer(self,text:str) -> RiskProfile:
+        
+        # Pattern-specific actions
+        for pattern in synergy_patterns:
+            if pattern["name"] == "Impersonation Rbi":
+                actions.extend([
+                    "🚨 **DO NOT CALL** any number in this message - it's fake",
+                    "📞 **CALL YOUR BANK DIRECTLY** using number on your passbook/card (NOT this message)",
+                    "🏛️ **RBI NEVER** contacts citizens via WhatsApp/SMS for personal matters"
+                ])
+            elif pattern["name"] == "Lottery Scam":
+                actions.extend([
+                    "💸 **NOBODY GIVES FREE MONEY** - especially not via random messages",
+                    "🚫 **NEVER PAY** 'processing fee' or 'tax' to claim prizes",
+                    "📢 **REAL LOTTERIES** don't notify winners via WhatsApp"
+                ])
+            elif pattern["name"] == "Digital Arrest":
+                actions.extend([
+                    "⚖️ **POLICE NEVER** arrest via video call or demand money to 'settle'",
+                    "🚔 **CALL 100** or visit local police station if threatened",
+                    "💰 **NEVER TRANSFER** money to 'avoid arrest' - it's always a scam"
+                ])
+            elif pattern["name"] == "Fake Investment":
+                actions.extend([
+                    "📊 **VERIFY SEBI REGISTRATION** of any investment scheme",
+                    "⏳ **IF TOO GOOD TO BE TRUE**, it is. High returns = high risk",
+                    "👥 **TESTIMONIALS CAN BE FAKED** - check independent reviews"
+                ])
+            elif pattern["name"] == "Urgent Kyc":
+                actions.extend([
+                    "🔐 **BANKS NEVER ASK** for KYC via links in messages",
+                    "📱 **USE OFFICIAL APP ONLY** - type URL yourself, don't click links",
+                    "🛡️ **YOUR ACCOUNT WON'T BE BLOCKED** for not clicking a link"
+                ])
+        
+        # If no specific pattern, use trigger-based actions
+        if not actions:
+            if "FEAR" in triggers and triggers["FEAR"] > 0.6:
+                actions.append("😰 **SCARE TACTICS DETECTED** - Real authorities don't threaten via SMS")
+            if "GREED" in triggers and triggers["GREED"] > 0.6:
+                actions.append("💰 **TOO GOOD TO BE TRUE** - Verify independently before believing")
+            if "URGENCY" in triggers and triggers["URGENCY"] > 0.6:
+                actions.append("⏱️ **URGENCY IS A RED FLAG** - Scammers rush you. Take 10 minutes to think")
+            if "AUTHORITY" in triggers and triggers["AUTHORITY"] > 0.6:
+                actions.append("🏛️ **VERIFY AUTHORITY** - Call official numbers, don't use message details")
+            
+            # Generic safe actions if no high triggers
+            if not actions:
+                if leg_score > 0.6:
+                    actions.extend([
+                        "✅ **Looks relatively safe**, but verify in official app",
+                        "🔍 **Double-check sender** - spoofing is common"
+                    ])
+                else:
+                    actions.append("🟡 **Use common sense** - When in doubt, delete")
+        
+        # Always add these universal actions
+        actions.extend([
+            "📞 **Customer Care**: Use number on your bank statement/card",
+            "🗑️ **When in doubt**: Delete and block sender",
+            "📢 **Report**: Forward to 1930 (National Cyber Crime Helpline)"
+        ])
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_actions = []
+        for a in actions:
+            action_key = a.split("**")[1].strip() if "**" in a else a
+            if action_key not in seen:
+                seen.add(action_key)
+                unique_actions.append(a)
+        
+        return unique_actions
+    
+    def infer(self, text: str) -> Dict:
+        # Anti-gaming check
+        is_gaming, reason, penalty = self.antigaming.check_gaming(text)
+        if is_gaming:
+            return {
+                "risk_score": round(penalty * 100, 2),
+                "level": "SCAM",
+                "confidence": 95.0,
+                "narrative": f"System detected gaming attempt: {reason}",
+                "triggers": {"ANTI-GAMING": penalty},
+                "synergy_patterns": [],
+                "claim_analysis": [],
+                "legitimacy_proof": [],
+                "coherence_issues": [reason],
+                "recos": ["🎮 This appears to be a test. Please use real messages for meaningful analysis."],
+                "is_gaming": True
+            }
+        
+        # Load model
         tok, mdl, _, _ = load_model()
         text = text.strip()
-        if not text: text="blank"
+        
+        # Get model predictions
         inputs = tok(text,return_tensors="pt",truncation=True,padding=True).to(DEVICE)
         with torch.no_grad():
             logits = mdl(**inputs).logits/self.T
             probs  = torch.sigmoid(logits).cpu().numpy()[0]
-        detected = probs>self.thres 
-        scam_signals = probs[detected].mean() if detected.any() else probs.max()*0.25
         
-        leg_score, leg_proof = self.trust.score(text)
+        # Analyze components
+        leg_score, leg_proof, leg_matches = self.trust.score(text)
         claims_list = self.claims.extract_claims(text)
-        ver_score, claim_details = self.claims.score_verifiability(claims_list)
-        incoh_score, incoh_issues = self.coherence.score(text)
+        ver_score, claim_details, red_flag_ratio = self.claims.score_verifiability(claims_list)
+        incoh_score, incoh_issues, incoh_subscores = self.coherence.score(text)
         
-        risk = scam_signals*(1-leg_score)**2*(1-ver_score)*(1+0.5*incoh_score)
-        base_thresh = np.array([0.25,0.5,0.75])
-        adaptive_thresh = base_thresh*(1-leg_score)*(1-0.5*ver_score)+0.2*incoh_score
-        if risk<adaptive_thresh[0]: level="SAFE"
-        elif risk<adaptive_thresh[1]: level="CAUTION"
-        elif risk<adaptive_thresh[2]: level="SUSPICIOUS"
-        else: level="SCAM"
+        # Detect triggers
+        detected = probs > self.thres
+        triggers = {label: float(p) for label, p, det in zip(self.synergy.cp_aft_labels, probs, detected) if det}
         
-        conf = (1-np.std(probs))*100
-        triggers = {label:float(p) for label,p,det in zip(CP_AFT_LABELS,probs,detected) if det}
-        recos = self._build_actions(RiskProfile(0,level,0,triggers,[],[],[],[]), leg_score, incoh_score)
+        # Analyze synergies
+        synergy_patterns = self.synergy.analyze_synergies(triggers, text)
         
-        return RiskProfile(round(float(risk*100),2),level,round(float(conf),2),
-                           triggers,recos,leg_proof,claim_details,incoh_issues)
+        # Calculate risk
+        risk = self.calculate_risk_score(probs, leg_score, ver_score, incoh_score, red_flag_ratio, 0.0)
+        
+        # Determine level with adaptive thresholds
+        base_thresh = np.array([0.2, 0.45, 0.7])  # More stringent
+        adaptive_thresh = base_thresh * (1 - leg_score) * (1 - 0.3 * ver_score) + 0.15 * incoh_score
+        
+        if risk < adaptive_thresh[0]:
+            level = "SAFE"
+        elif risk < adaptive_thresh[1]:
+            level = "CAUTION"
+        elif risk < adaptive_thresh[2]:
+            level = "SUSPICIOUS"
+        else:
+            level = "SCAM"
+        
+        # Confidence based on model certainty and context clarity
+        conf = (1 - np.std(probs)) * 100 * (1 - incoh_score * 0.3)
+        
+        # Generate narrative
+        narrative = self.generate_narrative(text, triggers, synergy_patterns, leg_matches, incoh_issues)
+        
+        # Build specific actions
+        recos = self.build_specific_actions(synergy_patterns, triggers, leg_score, incoh_score, text)
+        
+        return {
+            "risk_score": round(float(risk * 100), 2),
+            "level": level,
+            "confidence": round(float(conf), 2),
+            "narrative": narrative,
+            "triggers": triggers,
+            "synergy_patterns": synergy_patterns,
+            "claim_analysis": claim_details,
+            "legitimacy_proof": leg_proof,
+            "coherence_issues": incoh_issues,
+            "recos": recos,
+            "is_gaming": False
+        }
 
 # ============================================================
-# BHARATSCAM GUARDIAN  –  UNIQUE LIGHT-THEME UI
+# UI HELPERS
 # ============================================================
-import streamlit as st
-import time
-import tempfile
-import whisper
-import torch
-import pandas as pd
-import numpy as np
+def init_state():
+    for k in ["msg","result","stage","mode","message_history","submission_times"]:
+        if k not in st.session_state:
+            st.session_state[k] = [] if k in ["message_history","submission_times"] else None
 
-# ---------- colour palette (clean Indian summer) ----------
-THEME = {
-    "bg": "#FDFBF8",               # warm paper-white
-    "card": "#FFFFFF",
-    "accent": "#FF8F00",           # saffron accent
-    "safe": "#2E7D32",             # Indian-flag green
-    "caution": "#F57C00",          # soft amber
-    "suspicious": "#D32F2F",       # brick red
-    "scam": "#B71C1C",             # deep maroon
-    "text": "#3E2723",             # espresso brown
-    "subtle": "#8D6E63"            # warm grey
-}
+def risk_badge(level: str) -> str:
+    color = THEME.get(level.lower(), THEME["subtle"])
+    return f'<span style="background:{color}22;color:{color};padding:8px 18px;border-radius:999px;font-weight:600;">{level}</span>'
 
-# ---------- inject css ----------
-def local_css():
+def draw_risk_score(result: Dict):
+    color = THEME.get(result["level"].lower(), THEME["subtle"])
+    narrative_preview = result["narrative"][:150] + "..." if len(result["narrative"]) > 150 else result["narrative"]
+    
+    st.markdown(f"""
+    <div style="text-align:center;background:#fff;border-radius:20px;padding:35px;margin-bottom:25px;
+                box-shadow: 0 4px 18px rgba(0,0,0,.07);">
+        <div style="font-size:22px;color:{THEME["subtle"]};margin-bottom:8px;">Risk Assessment</div>
+        <div style="font-size:72px;font-weight:700;color:{color};line-height:1">{result["risk_score"]}<span style="font-size:36px">%</span></div>
+        <div style="margin-top:15px;">{risk_badge(result["level"])}</div>
+        <div class="subtle" style="margin-top:12px;">Confidence {result["confidence"]}%</div>
+        <div style="margin-top:20px;padding-top:20px;border-top:1px solid #eee;font-size:15px;color:{THEME["text"]};">
+            {narrative_preview}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.progress(float(result["risk_score"])/100.0)
+
+def draw_synergy_patterns(patterns: List[Dict]):
+    if not patterns:
+        st.success("✅ No coordinated scam patterns detected")
+        return
+    
+    st.markdown('<div style="font-size:24px;font-weight:600;margin:25px 0 15px 0;">🎯 Scam Pattern Analysis</div>', unsafe_allow_html=True)
+    
+    for pattern in patterns:
+        severity_color = "#D32F2F" if pattern["severity"] == "HIGH" else "#F57C00"
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#fff8e1 0%,#ffecb3 100%);border-left:5px solid {severity_color};
+                    border-radius:16px;padding:18px 22px;margin-bottom:18px;box-shadow:0 2px 8px rgba(0,0,0,.07);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <span style="font-size:20px;font-weight:600;color:{THEME["text"]};">{pattern["name"]}</span>
+                <span style="background:{severity_color}22;color:{severity_color};padding:5px 12px;border-radius:999px;font-weight:600;">
+                    {pattern["severity"]}
+                </span>
+            </div>
+            <div style="color:{THEME["text"]};font-size:16px;line-height:1.5;">
+                {pattern["narrative"]}
+            </div>
+            <div style="margin-top:12px;font-size:14px;color:{THEME["subtle"]};">
+                <b>Primary Triggers:</b> {', '.join(pattern["primary_triggers"])}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def draw_claim_cards(claims: List[Dict]):
+    if not claims:
+        st.info("No specific claims found in the message.")
+        return
+    
+    st.markdown('<div style="font-size:24px;font-weight:600;margin:25px 0 15px 0;">🔬 Claim Analysis</div>', unsafe_allow_html=True)
+    
+    type_colors = {
+        "financial": ("💰", "#2E7D32", "High verifiability"),
+        "temporal": ("⏰", "#F57C00", "Low verifiability"),
+        "identity": ("🏛️", "#1976D2", "Context-dependent"),
+        "action": ("✅", "#388E3C", "Action needed")
+    }
+    
+    for claim in claims:
+        icon, color, status = type_colors.get(claim["type"], ("•", THEME["subtle"], "Unknown"))
+        verif_status = "✓ Verifiable" if claim["verifiable"] else "⚠ Unverifiable"
+        
+        st.markdown(f"""
+        <div style="background:{color}11;border-left:5px solid {color};border-radius:14px;padding:16px 20px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;margin-bottom:8px;">
+                <span style="font-size:24px;margin-right:10px;">{icon}</span>
+                <span style="font-weight:600;font-size:18px;color:{THEME["text"]};">{claim["claim"]}</span>
+                <span style="margin-left:auto;background:{color}22;color:{color};padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;">
+                    {verif_status}
+                </span>
+            </div>
+            <div style="color:{THEME["subtle"]};font-size:14px;margin-bottom:8px;">
+                <b>Type:</b> {claim["type"].title()} | <b>Verifiability:</b> {claim["score"]:.0%}
+            </div>
+            <div style="color:{THEME["text"]};font-size:15px;background:#fff;padding:8px 12px;border-radius:8px;border-left:3px solid {color};">
+                Context: "{claim["context"]}"
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+def draw_section(title: str, items: List[str], icon: str, is_warning: bool = False):
+    if not items:
+        return
+    
+    color = "#D32F2F" if is_warning else THEME["safe"]
+    st.markdown(f'<div style="font-size:24px;font-weight:600;margin:25px 0 15px 0;">{icon} {title}</div>', unsafe_allow_html=True)
+    
+    for item in items:
+        st.markdown(f"""
+        <div style="background:{color}11;border-left:5px solid {color};border-radius:8px;padding:12px 16px;margin-bottom:10px;">
+            {item}
+        </div>
+        """, unsafe_allow_html=True)
+
+def draw_actions(recos: List[str]):
+    if not recos:
+        return
+    
+    st.markdown('<div style="font-size:24px;font-weight:600;margin:25px 0 15px 0;">💡 What You Should Do</div>', unsafe_allow_html=True)
+    
+    for i, reco in enumerate(recos[:6], 1):  # Show max 6 actions
+        st.markdown(f"""
+        <div style="background:#FFFFFF;border:2px solid {THEME["accent"]}33;border-radius:14px;padding:16px 20px;margin-bottom:14px;
+                    box-shadow: 0 2px 6px rgba(0,0,0,.05);font-size:17px;display:flex;align-items:center;">
+            <span style="background:{THEME["accent"]};color:#fff;width:28px;height:28px;border-radius:50%;display:inline-flex;
+                         align-items:center;justify-content:center;font-weight:600;margin-right:12px;font-size:14px;">{i}</span>
+            <span>{reco}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+def draw_narrative(narrative: str):
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,{THEME["accent"]}11 0%,{THEME["caution"]}11 100%);border-radius:16px;padding:20px 24px;
+                margin:25px 0;border:1px solid {THEME["accent"]}33;">
+        <div style="font-size:18px;font-weight:600;margin-bottom:12px;color:{THEME["text"]};">🧠 Why This Analysis?</div>
+        <div style="color:{THEME["text"]};line-height:1.6;font-size:15px;">
+            {narrative}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ============================================================
+# MAIN APPLICATION
+# ============================================================
+def main():
+    st.set_page_config(page_title="BharatScam Guardian", page_icon="🛡️", layout="centered")
+    
+    # CSS
     st.markdown(f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400   ;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     .stApp {{background: {THEME["bg"]}; color: {THEME["text"]}; font-family: 'Inter', sans-serif;}}
     .card {{background: {THEME["card"]}; border-radius: 16px; padding: 24px; margin-bottom: 24px;
             box-shadow: 0 2px 8px rgba(0,0,0,.06); border: 1px solid #F5F0EB;}}
@@ -266,317 +674,155 @@ def local_css():
     div.stButton > button:hover {{transform: scale(1.02);}}
     h1,h2,h3 {{font-weight: 700; letter-spacing: -0.5px;}}
     .subtle {{color: {THEME["subtle"]}; font-size: 14px;}}
-
-    /* --- glowing button --- */
-    @keyframes glow{{
-        0%  {{box-shadow:0 0 6px {THEME["accent"]}99;}}
-        50% {{box-shadow:0 0 18px {THEME["accent"]}ff;}}
-        100%{{box-shadow:0 0 6px {THEME["accent"]}99;}}
-    }}
-    .glow-button button{{
-        animation: glow 2s infinite;
-        font-size: 20px !important;
-        height: 56px !important;
-        border-radius: 14px !important;
-    }}
-
-    /* --- trigger fire cards --- */
-    @keyframes fire{{
-        0%  {{transform:scale(1);box-shadow:0 0 8px #ff8f0099;}}
-        50% {{transform:scale(1.02);box-shadow:0 0 20px #ff8f00ff;}}
-        100%{{transform:scale(1);box-shadow:0 0 8px #ff8f0099;}}
-    }}
-    .trigger-card{{
-        background:linear-gradient(135deg,#ff8f00 0%,#ff6f00 100%);
-        color:#fff;border-radius:16px;padding:14px 18px;margin-bottom:14px;
-        font-weight:600;font-size:18px;animation:fire 2s infinite;
-    }}
     </style>
     """, unsafe_allow_html=True)
-
-# ---------- helpers ----------
-def init_state():
-    for k in ["msg","profile","stage"]:
-        if k not in st.session_state:
-            st.session_state[k]=None
-
-def risk_badge(level:str) -> str:
-    color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[level]
-    return f'<span style="background:{color}22;color:{color};padding:6px 16px;border-radius:999px;font-weight:600;">{level}</span>'
-
-
-# ---------- UNIQUE RESULT WIDGETS ----------
-def draw_risk_score(rp:RiskProfile):
-    color = {"SAFE":THEME["safe"],"CAUTION":THEME["caution"],"SUSPICIOUS":THEME["suspicious"],"SCAM":THEME["scam"]}[rp.level]
-    st.markdown(f"""
-    <div style="text-align:center;background:#fff;border-radius:20px;padding:30px;margin-bottom:25px;
-                box-shadow: 0 4px 18px rgba(0,0,0,.07);">
-        <div style="font-size:20px;color:{THEME["subtle"]};margin-bottom:8px;">Risk Score</div>
-        <div style="font-size:64px;font-weight:700;color:{color};line-height:1">{rp.score}<span style="font-size:32px">%</span></div>
-        <div style="margin-top:12px;">{risk_badge(rp.level)}</div>
-        <div class="subtle" style="margin-top:10px;">Confidence {rp.confidence}%</div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.progress(float(rp.score)/100.0)
-
-def draw_triggers(triggers:Dict[str,float]):
-    st.markdown('<div style="font-size:22px;font-weight:600;margin-bottom:12px;">🎯 Detected Scam Triggers</div>', unsafe_allow_html=True)
-    if triggers:
-        for k,v in triggers.items():
-            st.markdown(f"""
-            <div class="trigger-card">
-                <span style="font-size:20px;">{k.replace('_',' ').title()}</span>
-                <span style="float:right;background:rgba(255,255,255,.3);padding:4px 10px;border-radius:999px;">
-                    {float(v):.0%}
-                </span>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        st.success("No triggers fired – message looks clean on this axis.")
-
-def draw_claim_cards(details:List[str]):
-    st.markdown('<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">🔬 Claim Verifiability</div>', unsafe_allow_html=True)
-    if not details:
-        st.info("No specific claims found.")
-        return
-    for d in details:
-        if "💰" in d:
-            st.markdown(f"""
-            <div style="background:#2E7D3211;border-left:5px solid #2E7D32;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">💰</span> <b>Financial</b><br/>
-                <span style="color:#2E7D32;font-weight:600;">High verifiability</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-        elif "⏰" in d:
-            st.markdown(f"""
-            <div style="background:#F57C0011;border-left:5px solid #F57C00;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">⏰</span> <b>Temporal</b><br/>
-                <span style="color:#F57C00;font-weight:600;">Low verifiability</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-        elif "🏛️" in d:
-            st.markdown(f"""
-            <div style="background:#1976D211;border-left:5px solid #1976D2;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">🏛️</span> <b>Identity</b><br/>
-                <span style="color:#1976D2;font-weight:600;">Medium verifiability</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-        elif "✅" in d:
-            st.markdown(f"""
-            <div style="background:#388E3C11;border-left:5px solid #388E3C;border-radius:12px;padding:14px 18px;margin-bottom:12px;">
-                <span style="font-size:20px;">✅</span> <b>Action</b><br/>
-                <span style="color:#388E3C;font-weight:600;">Verifiable</span> – {d.split("–")[-1]}
-            </div>
-            """, unsafe_allow_html=True)
-
-def draw_section(title:str, items:List[str], icon:str):
-    if not items: return
-    st.markdown(f'<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">{icon} {title}</div>', unsafe_allow_html=True)
-    for x in items:
-        st.markdown(f"""
-        <div style="background:#2E7D3211;border-left:5px solid #2E7D32;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
-            {x}
-        </div>
-        """, unsafe_allow_html=True)
-
-def draw_warning_section(title:str, items:List[str], icon:str):
-    if not items: return
-    st.markdown(f'<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">{icon} {title}</div>', unsafe_allow_html=True)
-    for x in items:
-        st.markdown(f"""
-        <div style="background:#D32F2F11;border-left:5px solid #D32F2F;border-radius:8px;padding:10px 14px;margin-bottom:10px;">
-            {x}
-        </div>
-        """, unsafe_allow_html=True)
-
-def draw_actions(recos:List[str]):
-    st.markdown('<div style="font-size:22px;font-weight:600;margin:20px 0 12px 0;">💡 Recommended Actions</div>', unsafe_allow_html=True)
-    for r in recos:
-        st.markdown(f"""
-        <div style="background:#FFFFFF;border:2px solid {THEME["accent"]}66;border-radius:12px;padding:14px 18px;margin-bottom:12px;
-                    box-shadow: 0 2px 6px rgba(0,0,0,.05);font-size:17px;">
-            {r}
-        </div>
-        """, unsafe_allow_html=True)
-
-# ---------- page ----------
-def main():
-    st.set_page_config(page_title="BharatScam Guardian", page_icon="🛡️", layout="centered")
-    local_css()
+    
     init_state()
-
-    # ---- hero ----
+    
+    # Hero
     st.markdown(f"""
-        <div style="text-align:center;margin-top:-60px;margin-bottom:40px;">
+        <div style="text-align:center;margin-top:-40px;margin-bottom:40px;">
         <h1 style="font-size:52px;background:-webkit-linear-gradient(45deg,{THEME["accent"]},#FF6F00);
                    -webkit-background-clip:text;-webkit-text-fill-color:transparent;">BharatScam Guardian</h1>
-        <p class="subtle">AI that smells a rat — but sometimes barks at shadows 🤖</p>
+        <p class="subtle">AI that understands Indian scam patterns 🛡️</p>
         </div>
         """, unsafe_allow_html=True)
+    
+    # Mode toggle state
     if "mode" not in st.session_state:
-        st.session_state.mode = False
-
-    # ---------- language-capability hint ----------
-    hint = (
-        "🎙️ Speech  –  English"
-        if st.session_state.mode else
-        "💬 Text  –  Hindi, English, Hinglish"
-    )
-    st.markdown(
-        f'<div style="text-align:center;margin-bottom:8px;">'
-        f'<span style="background:#FF8F0022;color:#FF8F00;'
-        f'padding:4px 12px;border-radius:999px;font-size:13px;'
-        f'font-weight:600;">{hint}</span></div>',
-        unsafe_allow_html=True
-    )
-
-    # ---- input ----
-    # ---------- UNIQUE TOGGLE ----------
-    st.markdown("""
-    <style>
-      .toggle-pill{
-        display:inline-flex;align-items:center;border-radius:999px;
-        padding:6px 14px;font-weight:600;cursor:pointer;
-        transition:all .3s ease;
-      }
-      .off{background:#e0e0e0;color:#333}
-      .on{background:#ff8f00;color:#fff}
-    </style>
-    """, unsafe_allow_html=True)
-
-    # click detector
-    if st.button(
-        label=f"{'🎤'} Speak" if st.session_state.mode else f"{'⌨️'} Type",
-        key="pill_toggle",
-        help="Switch input mode"
-    ):
-        st.session_state.mode = not st.session_state.mode
-        st.rerun()
-
-    mode = st.session_state.mode
-
-    # ---------- unified text box ----------
-    if st.session_state.get("mode"):          # SPEECH MODE
-        st.markdown(
-    """
-    <div style="
-        background: linear-gradient(135deg,#fff8e1 0%,#ffecb3 100%);
-        border-left:5px solid #ff8f00;
-        border-radius:12px;
-        padding:14px 18px;
-        font-size:17px;
-        color:#3e2723;
-        box-shadow:0 2px 6px rgba(0,0,0,.07);
-    ">
-    👂 <b>I’m listening. </b> Press START and tell me.
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+        st.session_state.mode = False  # False = Text, True = Speech
+    
+    # Mode switcher
+    col_mode1, col_mode2, col_mode3 = st.columns([1,2,1])
+    with col_mode2:
+        mode_text = "🎤 Voice Mode" if st.session_state.mode else "⌨️ Text Mode"
+        if st.button(mode_text, use_container_width=True, key="mode_toggle"):
+            st.session_state.mode = not st.session_state.mode
+            st.rerun()
+    
+    # Input handling
+    msg = None
+    if st.session_state.mode:  # Speech mode
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#fff8e1 0%,#ffecb3 100%);border-left:5px solid #ff8f00;
+                    border-radius:12px;padding:14px 18px;font-size:17px;color:#3e2723;margin-bottom:15px;">
+        👂 <b>I'm listening...</b> Record your message below.
+        </div>
+        """, unsafe_allow_html=True)
+        
         audio_bytes = st.audio_input("Record", key="mic")
         if audio_bytes is not None:
             audio_raw = audio_bytes.read()
-            audio_hash = hash(audio_raw)
-            # run Whisper only once per new recording
+            audio_hash = hashlib.md5(audio_raw).hexdigest()
+            
             if st.session_state.get("_last_audio_hash") != audio_hash:
                 st.session_state._last_audio_hash = audio_hash
-                with st.spinner("🧠 Turning your voice into words…"):
+                with st.spinner("🧠 Transcribing your voice..."):
                     model = load_whisper()
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                         tmp.write(audio_raw)
-                        tmp.flush()
                         tmp_path = tmp.name
+                    
                     try:
                         result = model.transcribe(tmp_path, fp16=False)
-                        text = result.get("text","").strip()
-                        lang = result.get("language","")
-                        # fallback only if text is too short or language unknown
-                        if lang not in {"en","hi"} and len(text)<6:
-                            result = model.transcribe(tmp_path, language="hi", fp16=False)
-                            text = result.get("text","").strip()
-                        # ---- KEY FIX: assign to a *different* key, then rerun ----
-                        st.session_state["msg"] = text
+                        text = result.get("text", "").strip()
+                        st.session_state.msg = text
                         st.rerun()
                     finally:
-                        # delete temp file
                         import os
                         if os.path.exists(tmp_path):
                             os.remove(tmp_path)
-
-    # ---------- unified text box ----------#
-    
-    msg = st.text_area("",key="msg",placeholder="🎙️ I’m listening…" if mode else "💬 Paste it here – I’ll take a look.",height=180,label_visibility="collapsed")
+    else:  # Text mode
+        st.markdown("""
+        <div style="background:linear-gradient(135deg,#e8f5e9 0%,#c8e6c9 100%);border-left:5px solid #4CAF50;
+                    border-radius:12px;padding:14px 18px;font-size:17px;color:#3e2723;margin-bottom:15px;">
+        💬 <b>Paste your message</b> - Hindi, English, or Hinglish supported
+        </div>
+        """, unsafe_allow_html=True)
         
-    # single source of truth from here on
+        msg = st.text_area("", key="msg_input", placeholder="Paste suspicious message here...", height=180, 
+                          label_visibility="collapsed")
     
-
-    # ---------- glowing analyse button ----------
-    col1,col2,col3 = st.columns([1,2,1])
-    with col2:
-        if st.button("🛡️ Guard This Message", use_container_width=True, key="ana"):
-            if msg.strip():
+    # Use either voice or text input
+    final_msg = st.session_state.get("msg", "") if st.session_state.mode else msg
+    
+    # Analyze button
+    col_btn1, col_btn2, col_btn3 = st.columns([1,2,1])
+    with col_btn2:
+        if st.button("🛡️ Analyze Message", use_container_width=True, key="analyze", 
+                    type="primary", disabled=not final_msg):
+            if final_msg and len(final_msg.strip()) > 5:
                 st.session_state.stage = "RUNNING"
+                st.session_state.msg_cache = final_msg
                 st.rerun()
-
-    # ---- running ----
-    if st.session_state.stage=="RUNNING":
+    
+    # Processing
+    if st.session_state.stage == "RUNNING":
         with st.container():
-            st.markdown('<div class="card"><h4>🔍 Reading between the lines…</h4>', unsafe_allow_html=True)
+            st.markdown('<div class="card"><h4>🔍 Analyzing message patterns...</h4>', unsafe_allow_html=True)
             bar = st.progress(0)
             for i in range(100):
                 bar.progress(i+1)
-                time.sleep(0.005)
-            orch = CoreOrchestrator(*load_model()[2:])  # replace with your real orchestrator
-            st.session_state.profile = orch.infer(st.session_state.msg)
-            st.session_state.stage="DONE"
+                time.sleep(0.008)
+            
+            orch = CoreOrchestrator(*load_model()[2:])
+            st.session_state.result = orch.infer(st.session_state.msg_cache)
+            st.session_state.stage = "DONE"
             st.markdown('</div>', unsafe_allow_html=True)
             st.rerun()
-
-    # ---- results ----
-    if st.session_state.stage=="DONE" and st.session_state.profile:
-        p = st.session_state.profile
-
-        # top card with personality hint
-        draw_risk_score(p)
-        draw_triggers(p.triggers)
-        draw_claim_cards(p.claim_analysis)
-        draw_section("Legitimacy Anchors", p.legitimacy_proof, "✅")
-        draw_warning_section("Coherence Issues", p.coherence_issues, "⚠️")
-        draw_actions(p.recos)
-
-        # reset
-        if st.button("🔄 Analyze New Message", use_container_width=True):
-             st.session_state.pop("msg", None)
-             st.session_state.pop("profile", None)
-             st.session_state.pop("stage", None)
-             st.rerun()
-            
-            
-             
-             
-            
-    # ---- persistent footer ----
-    st.markdown(
-        """
-        <div style="
-            text-align:center;
-            margin-top:40px;
-            padding:16px 0;
-            color:#8D6E63;
-            font-size:14px;
-        ">
-            Built with ❤️ by <b>Prakhar Mathur</b>. BITS Pilani<br/>
-            <span style="font-size:13px;">
-                Contact us: 
-                <a href="mailto:prakhar.mathur2020@gmail.com" 
-                   style="color:#FF8F00;text-decoration:none;font-weight:600;">
-                   Meet my devloper
-                </a>
-            </span>
+    
+    # Results
+    if st.session_state.stage == "DONE" and st.session_state.result:
+        result = st.session_state.result
+        
+        # Risk score and badge
+        draw_risk_score(result)
+        
+        # Narrative explanation
+        draw_narrative(result["narrative"])
+        
+        # Synergy patterns (if any)
+        draw_synergy_patterns(result["synergy_patterns"])
+        
+        # Individual triggers (compact view)
+        if result["triggers"]:
+            st.markdown('<div style="font-size:20px;font-weight:600;margin:20px 0 12px 0;">📊 Trigger Signals</div>', unsafe_allow_html=True)
+            trigger_cols = st.columns(len(result["triggers"]))
+            for i, (trigger, score) in enumerate(result["triggers"].items()):
+                with trigger_cols[i]:
+                    st.markdown(f"""
+                    <div style="background:{THEME["accent"]}22;border-radius:12px;padding:12px;text-align:center;">
+                        <div style="font-size:18px;font-weight:600;">{trigger.replace('_',' ').title()}</div>
+                        <div style="font-size:24px;color:{THEME["accent"]};">{score:.0%}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Claims analysis
+        draw_claim_cards(result["claim_analysis"])
+        
+        # Legitimacy and issues
+        draw_section("✅ Legitimacy Anchors", result["legitimacy_proof"], "✅")
+        draw_section("⚠️ Coherence Issues", result["coherence_issues"], "⚠️", is_warning=True)
+        
+        # Actions
+        draw_actions(result["recos"])
+        
+        # Reset
+        if st.button("🔄 Analyze Another Message", use_container_width=True, key="reset"):
+            for key in ["msg", "result", "stage", "msg_cache", "msg_input"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
+    
+    # Footer
+    st.markdown("""
+        <div style="text-align:center;margin-top:40px;padding:16px 0;color:#8D6E63;font-size:14px;">
+            Built for Indian users 🇮🇳 | 
+            <a href="mailto:prakhar.mathur2020@gmail.com" style="color:#FF8F00;text-decoration:none;font-weight:600;">
+                Contact Developer
+            </a>
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+        """, unsafe_allow_html=True)
 
-if __name__=="__main__": 
+if __name__ == "__main__":
     main()
