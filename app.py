@@ -36,32 +36,19 @@ COLORS = {
 CP_AFT_LABELS = ["AUTHORITY","URGENCY","FEAR","GREED",
                  "SOCIAL_PROOF","SCARCITY","OBEDIENCE","TRUST"]
 LEGITIMATE_PATTERNS = {
-    "bank_official": r'\b(?:(?:HDFC|ICICI|SBI|AXIS|KOTAK|BOB|PNB|UNION|CANARA|INDIAN|YES|IDFC)[\s._-]*(?:BANK|LTD|LIMITED|BK)|(?:RBI|NPCI|IRDAI|SEBI|NSE|BSE|PFRDA|NHB))\b',
-    
-    "govt_entity": r'\b(?:UIDAI|ITA|GSTN|EPFO|CBDT|MCA|CEIR|MEITY|DOT|TRAI|ESIC|NPS|DGFT)[\s._-]*(?:GOV|NIC|IN|ORG)?\b|\b(?:\w+[\._-])*(?:gov\.in|nic\.in|ac\.in|edu\.in)\b',
-    
-    "fin_reference": r'\b(?:UTR|RRN|ARN|UPI[\s._-]*REF|CRN|PRN|SRN|Txn|Trans)[\s._-]*(?:No|ID|NUM|NUMBER)?:?[\s._-]*[A-Z0-9]{8,20}(?:[A-Z0-9]{2})?\b',
-    
-    "official_contact": r'\b(?:(?:1800|1860|139|155260|14444|1950|1930)[\s._-]*-?\d{3,4}[\s._-]*-?\d{3,4}|(?:\+91|0)?[\s._-]?[6-9]\d{9})\b',
-    
-    "trusted_domain": r'\bhttps?://(?:[\w.-]+\.)?(?:hdfcbank\.com|icicibank\.com|sbi\.co\.in|axisbank\.com|paytm\.com|amazon\.in|flipkart\.com|uidai\.gov\.in|incometax\.gov\.in|npci\.org\.in)(?:[/?#]\S*)?\b'
+    "bank_official": r'\b(?:HDFC|ICICI|SBI|AXIS|KOTAK|BOB|PNB)[\s]*(?:Bank|Ltd|Limited)\b|\bRBI\b|\bNPCI\b|\bIRDAI\b',
+    "govt_official": r'\b(?:UIDAI|ITA|GST|EPFO|CBDT|MCA|CEIR)\b|\b(?:gov\.in|nic\.in|ac\.in)\b',
+    "verifiable_ref": r'\b(?:UTR|Ref|Reference|Txn|Transaction)[\s]*[No|ID|Number]*[:#]?\s*[A-Z0-9]{8,20}\b',
+    "official_contact": r'\b(?:1800|1860)[\s]*-?\d{3}[\s]*-?\d{4}\b|\b(?:91|0)?\s*\d{8}\b',
+    "secure_url": r'\bhttps?://(?:www\.)?(?:hdfcbank\.com|icicibank\.com|sbi\.co\.in|axisbank\.com|paytm\.com|amazon\.in|flipkart\.com)[/\w.-]*\b'
 }
 
 SCAM_PATTERNS = {
-    "urgency_pressure": r'\b(?:IMMEDIATELY|NOW|URGENT|WITHIN[\s._-]*\d+|LAST[\s._-]*CHANCE|ACCOUNT[\s._-]*LOCK|LIMITED[\s._-]*TIME)\b(?![\s\S]{0,30}(?:FRAUD|UNAUTHORIZED|NOT\s+YOU))',
-    
-    "impersonation_auth": r'\b(?:FAKE|FRAUD|SPOOF|IMPERSONAT|SCAM).{0,15}(?:RBI|BANK|GOVT|POLICE|CIBIL|IT[\s._-]*DEPT|CUSTOMER[\s._-]*CARE|KYC[\s._-]*TEAM|SBI|PAYTM)|\b(?:RBI|BANK|PAYTM).{0,15}(?:CALLING|CALL|CONTACT|SUSPEND|BLOCK)\b',
-    
-    "generic_salutation": r'\b(?:DEAR[\s._-]*CUSTOMER|VALUED[\s._-]*USER|RESPECTED[\s._-]*SIR|MADAM|JI|BHAIYA|DIDI|YAAR)[,.]?[\s]*(?:YOUR|AAPKI|AAPKA)\b',
-    
-    "payment_redirect": r'\b(?:PAY|TRANSFER|SEND|DEPOSIT|SCAN|UPI).{0,20}(?:NEW|ALTERNATE|OTHER|PERSONAL|QR|WALLET|UPI[\s._-]*ID|ACCOUNT)[\s._-]*(?:DETAIL|INFO|NUMBER)|\b(?:ADVANCE|PROCESSING|REGISTRATION|GST)[\s._-]*FEE\b',
-    
-    "kyc_cashback_loot": r'\b(?:KYC|PAN|AADHAAR).{0,15}(?:EXPIRED|INCOMPLETE|SUSPEND|UPDATE|LINK|MANDATORY).{0,15}(?:CLICK|CALL|SHARE)|\b(?:CASHBACK|REFUND|PRIZE|LOTTERY|REWARD).{0,10}(?:RS\.?|₹)\s*\d{4,}',
-    
-    "crypto_digital_scam": r'\b(?:BITCOIN|USDT|CRYPTO|TRADING|FOREX|MINING).{0,10}(?:DOUBLE|2X|3X|GUARANTEED|PROFIT|INVESTMENT|DM|WHATSAPP)\b',
-    
-    "job_mule_fraud": r'\b(?:WORK[\s._-]*FROM[\s._-]*HOME|PART[\s._-]*TIME|GOOGLE[\s._-]*REVIEW|GIFT[\s._-]*CARD|ACCOUNT[\s._-]*OPENING).{0,15}(?:RS\.?|₹)\s*\d{3,6}\b'
-}
+    "urgency_vague": r'\b(immediately|now|urgent|within\s+\d+\s+hours?)\b(?!.*\b(fraud|unauthorized)\b)',
+    "authority_impersonation": r'\b(?:fake|fraud|spoof|impersonat).*(?:RBI|Bank|Govt|Police|CIBIL|IT Dept)\b',
+    "unverifiable_sender": r'\b(?:Dear Customer|Valued User|Respected Sir/Madam)\b',
+    "payment_redirection": r'\b(?:pay|transfer|send).*?(?:UPI|Wallet|Account).*?(?:new|alternate|other)\b'
+}  
 # ============================================================
 # DATACLASSES
 # ============================================================
