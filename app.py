@@ -1,6 +1,7 @@
 # ============================================================
 # IMPORTS
 # ============================================================
+import unicodedata
 import streamlit as st
 import torch, torch.nn.functional as F
 import numpy as np
