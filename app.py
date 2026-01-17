@@ -708,7 +708,7 @@ def main():
     col1,col2,col3 = st.columns([1,2,1])
     with col2:
         if st.button("🛡️ Guard This Message", use_container_width=True, key="ana"):
-            if msg.strip():
+            if  msg and msg.strip():
                 st.session_state.stage = "RUNNING"
                 st.rerun()
 
