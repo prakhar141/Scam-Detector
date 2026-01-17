@@ -690,7 +690,8 @@ class CoreOrchestrator:
             logits = mdl(**inputs).logits / self.T
             probs = torch.sigmoid(logits).cpu().numpy()[0]
         
-        detected = probs > self.thres
+        # Broadcast-safe threshold comparison
+        detected = probs > (self.thres if len(self.thres) == len(probs) else self.thres[0])
         scam_signals = probs[detected].mean() if detected.any() else probs.max() * 0.25
         
         # --- Veteran Heuristic: "Too Clean" Detection ---
