@@ -21,7 +21,7 @@ import streamlit_toggle as tog   # pip install streamlit-toggle-switch-pkg
 # GLOBAL CONFIG
 # ============================================================
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-REPO_ID = "prakhar146/scam"
+REPO_ID = "prakhar146/scam-detection"
 LOCAL_DIR = Path("./hf_cpaft_core")
 LOCAL_DIR.mkdir(exist_ok=True)
 
@@ -691,7 +691,7 @@ class CoreOrchestrator:
             probs = torch.sigmoid(logits).cpu().numpy()[0]
         
         # Broadcast-safe threshold comparison
-        detected = probs > (self.thres if len(self.thres) == len(probs) else self.thres[0])
+        detected = probs > self.thres
         scam_signals = probs[detected].mean() if detected.any() else probs.max() * 0.25
         
         # --- Veteran Heuristic: "Too Clean" Detection ---
