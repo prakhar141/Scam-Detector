@@ -1084,7 +1084,8 @@ def main():
             for i in range(100):
                 bar.progress(i+1)
                 time.sleep(0.005)
-            orch = CoreOrchestrator(*load_model()[2:])  # replace with your real orchestrator
+            T, thres = load_model()[2:] 
+            orch = CoreOrchestrator(T, thres)   # replace with your real orchestrator
             st.session_state.profile = orch.infer(st.session_state.msg)
             st.session_state.stage="DONE"
             st.markdown('</div>', unsafe_allow_html=True)
