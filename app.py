@@ -585,7 +585,7 @@ def load_model():
     tok = AutoTokenizer.from_pretrained(LOCAL_DIR)
     mdl = AutoModelForSequenceClassification.from_pretrained(LOCAL_DIR).to(DEVICE).eval()
     with open(LOCAL_DIR/"scam_v1.json") as f: cal=json.load(f)
-    return tok, mdl, float(cal["temperature"]), np.array(cal["thresholds"])
+    return tok, mdl, float(1), np.array(cal["thresholds"])
 # >>> WHISPER START <<<
 @st.cache_resource
 def load_whisper():
